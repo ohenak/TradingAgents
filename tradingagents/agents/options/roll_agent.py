@@ -215,7 +215,10 @@ Rule 2 (DTE Rule): If current DTE <= {dte_to_roll} days
    → trigger: dte_rule, action: ROLL to [{dte_low}, {dte_high}] DTE expiry
 
 Rule 3 (Breach — CSP only): If abs(delta) > 0.85 AND wheel_phase == "csp_open"
-   → trigger: breach_rule_roll, action: ROLL (assignment likely)
+   Sub-case 3a (breach_rule_roll): current option value >= 50% of premium received
+   → trigger: breach_rule_roll, action: ROLL (position retains value; manage assignment risk — REQ-LIFE-03 AC3a)
+   Sub-case 3b (breach_rule_close): current option value < 50% of premium received
+   → trigger: breach_rule_close, action: CLOSE (deep loss; cap further losses — REQ-LIFE-03 AC3b)
 
 Rule 4 (Deep OTM): If abs(delta) < 0.10
    → trigger: profit_capture, action: HOLD (collect theta, very far OTM)
