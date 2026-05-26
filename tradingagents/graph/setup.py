@@ -1,11 +1,13 @@
 # TradingAgents/graph/setup.py
 
+import warnings
 from typing import Any, Dict
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from tradingagents.agents import *
 from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.dataflows.config import get_config
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
@@ -69,6 +71,7 @@ class GraphSetup:
         workflow = StateGraph(AgentState)
 
         # Add analyst nodes to the graph
+        first_analyst_node = plan.specs[0].agent_node
         for spec in plan.specs:
             workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
             workflow.add_node(spec.clear_node, create_msg_delete())
@@ -84,9 +87,65 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
-        # Define edges
-        # Start with the first analyst
-        workflow.add_edge(START, plan.specs[0].agent_node)
+        # --- Wheel options nodes (ADR-WHEEL-03) ---
+        # Config validation warning for options_lookforward_days
+        try:
+            cfg = get_config()
+            wheel_cfg = cfg.get("wheel", {})
+            options_lookforward = wheel_cfg.get("options_lookforward_days", 90)
+            dte_high = wheel_cfg.get("recommended_dte_high", 45)
+            if options_lookforward < dte_high:
+                warnings.warn(
+                    f"options_lookforward_days ({options_lookforward}) is less than "
+                    f"recommended_dte_high ({dte_high}). "
+                    f"The effective lookforward window will be extended automatically.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        except Exception:
+            pass
+
+        wheel_selected = "wheel" in [a.lower() for a in selected_analysts]
+
+        if wheel_selected:
+            # Register WheelAnalyst node
+            wheel_analyst_node = create_wheel_analyst(self.deep_thinking_llm)
+            workflow.add_node("wheel_analyst", wheel_analyst_node)
+
+            # Register options execution nodes
+            csp_agent_node = create_csp_agent(self.deep_thinking_llm)
+            cc_agent_node = create_cc_agent(self.deep_thinking_llm)
+            roll_check_agent_node = create_roll_check_agent(self.quick_thinking_llm)
+            workflow.add_node("csp_agent", csp_agent_node)
+            workflow.add_node("cc_agent", cc_agent_node)
+            workflow.add_node("roll_check_agent", roll_check_agent_node)
+
+            # Register wheel_cycle_summary node
+            from tradingagents.graph.wheel_nodes import wheel_cycle_summary
+            workflow.add_node("wheel_cycle_summary", wheel_cycle_summary)
+            workflow.add_edge("wheel_cycle_summary", END)
+
+        # --- Conditional START edge (ADR-WHEEL-03) ---
+        # Build the full routing mapping for route_wheel_phase
+        # Update first_analyst_node on ConditionalLogic to match the plan
+        self.conditional_logic.first_analyst_node = first_analyst_node
+
+        # Build route mapping
+        wheel_route_mapping: dict = {
+            first_analyst_node: first_analyst_node,
+        }
+        if wheel_selected:
+            wheel_route_mapping.update({
+                "roll_check_agent": "roll_check_agent",
+                "cc_agent": "cc_agent",
+                "wheel_cycle_summary": "wheel_cycle_summary",
+            })
+
+        workflow.add_conditional_edges(
+            START,
+            self.conditional_logic.route_wheel_phase,
+            wheel_route_mapping,
+        )
 
         # Connect analysts in sequence
         for i, spec in enumerate(plan.specs):
@@ -126,7 +185,12 @@ class GraphSetup:
             },
         )
         workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Aggressive Analyst")
+        if wheel_selected:
+            # Route through wheel_analyst before risk debate (ADR-WHEEL-03)
+            workflow.add_edge("Trader", "wheel_analyst")
+            workflow.add_edge("wheel_analyst", "Aggressive Analyst")
+        else:
+            workflow.add_edge("Trader", "Aggressive Analyst")
         workflow.add_conditional_edges(
             "Aggressive Analyst",
             self.conditional_logic.should_continue_risk_analysis,

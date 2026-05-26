@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Approved |
+| **Status** | Implemented ✅ |
 | **Author** | SE-Author (Claude Code) |
 | **Version** | 0.3.0 |
 | **Created** | 2026-05-25 |
@@ -56,11 +56,11 @@ The existing equity pipeline must remain fully functional throughout (REQ-NFR-01
 
 Before any batch begins, confirm:
 
-- [ ] **REQ v0.3.0 is merged onto `feat-wheel-options-trading`** (see PREREQUISITE GATE above).
-- [ ] Feature branch `feat-wheel-options-trading` is checked out and up to date with `origin/feat-wheel-options-trading`.
-- [ ] All upstream docs are approved: REQ v0.3.0, FSPEC v0.3.0, TSPEC v0.2.0, DECISIONS v0.3.0.
-- [ ] `scipy` is available or an alternative implementation for `norm.cdf`/`norm.pdf` is chosen (TSPEC Section 10.7 open question — see Section 10 of this PLAN).
-- [ ] `tests/fixtures/` directory exists; create it if absent.
+- [x] **REQ v0.3.0 is merged onto `feat-wheel-options-trading`** (see PREREQUISITE GATE above).
+- [x] Feature branch `feat-wheel-options-trading` is checked out and up to date with `origin/feat-wheel-options-trading`.
+- [x] All upstream docs are approved: REQ v0.3.0, FSPEC v0.3.0, TSPEC v0.2.0, DECISIONS v0.3.0.
+- [x] `scipy` is available or an alternative implementation for `norm.cdf`/`norm.pdf` is chosen (TSPEC Section 10.7 open question — see Section 10 of this PLAN).
+- [x] `tests/fixtures/` directory exists; create it if absent.
 
 ---
 
@@ -195,13 +195,13 @@ The feature is divided into four implementation batches. Each batch corresponds 
 | 7 | B1-T-VERIFY | `tests/test_options_data.py` (complete) | **TEST VERIFY (TDD Green phase).** Flesh out all test stubs written in B1-T-STUB with full assertions. Run the full test suite; all B1 tests must pass. Confirm: BSM numeric verification passes (`Delta_put ≈ −0.4602 ± 0.0005`, `Theta_daily ≈ −0.0314 ± 0.005`; note: `−0.0314` is formula-derived and authoritative — Hull 10e shows `−0.0327` due to different inputs, not a target). Zero-variance guard passes. No network calls in any test. | B1-T1, B1-T2, B1-T3, B1-T4, B1-T5, B1-T6 | REQ-NFR-05; TSPEC §2.1.1–2.2; PROP-IV-01, PROP-IV-02 |
 
 **Batch 1 Definition of Done:**
-- [ ] All four functions in `y_finance_options.py` implemented and tested.
-- [ ] All four `@tool` wrappers in `options_data_tools.py` implemented and tested.
-- [ ] `interface.py` updated: `"options_data"` category registered, four methods in `VENDOR_METHODS`.
-- [ ] `tests/fixtures/options_fixtures.py` created with canonical `option_chain_fixture`.
-- [ ] BSM numeric verification test passes (`Delta_put ≈ −0.4602 ± 0.0005`, `Theta_daily ≈ −0.0314 ± 0.005`). The `−0.0314` value is formula-derived and authoritative; Hull 10e Table 19.1's `−0.0327` uses different inputs and is not the implementation target.
-- [ ] Zero-variance guard test passes: `iv_series=[0.20]*100` → `iv_rank=50`, report contains `"IV range is flat — rank set to neutral 50"`.
-- [ ] All unit tests pass with no network calls.
+- [x] All four functions in `y_finance_options.py` implemented and tested.
+- [x] All four `@tool` wrappers in `options_data_tools.py` implemented and tested.
+- [x] `interface.py` updated: `"options_data"` category registered, four methods in `VENDOR_METHODS`.
+- [x] `tests/fixtures/options_fixtures.py` created with canonical `option_chain_fixture`.
+- [x] BSM numeric verification test passes (`Delta_put ≈ −0.4602 ± 0.0005`, `Theta_daily ≈ −0.0314 ± 0.005`). The `−0.0314` value is formula-derived and authoritative; Hull 10e Table 19.1's `−0.0327` uses different inputs and is not the implementation target.
+- [x] Zero-variance guard test passes: `iv_series=[0.20]*100` → `iv_rank=50`, report contains `"IV range is flat — rank set to neutral 50"`.
+- [x] All unit tests pass with no network calls.
 
 ---
 
@@ -222,14 +222,14 @@ The feature is divided into four implementation batches. Each batch corresponds 
 | 6 | B2-T-VERIFY | `tests/test_schemas.py` (complete), `tests/test_config_wheel.py` (complete), `tests/test_wheel_position.py` (complete) | **TEST VERIFY (TDD Green phase).** Complete all stubs. Run the full test suite; all B2 tests must pass. Confirm: `model_validator` enforcement passes; `load_latest_open_position` cycle-10 > cycle-9 regression test passes (`PROP-POSN-01`); env var overrides active. No B1 tests broken. | B2-T1, B2-T2, B2-T3, B2-T4, B2-T5 | REQ-SCREEN-02 AC1–AC3, REQ-NFR-03, REQ-NFR-05; TSPEC §3, §8, §9; ADR-WHEEL-05 |
 
 **Batch 2 Definition of Done:**
-- [ ] All six schemas added to `schemas.py` with render helpers.
-- [ ] `STRUCTURED_OUTPUT_SENTINEL` constant in `structured.py`.
-- [ ] Five new `Optional[str]` fields in `AgentState`.
-- [ ] `config["wheel"]` sub-dict with 18 keys and env var overrides.
-- [ ] `tradingagents/models/wheel_position.py` with atomic I/O.
-- [ ] `load_latest_open_position` integer-sort regression test passes (cycle-10 returned over cycle-9).
-- [ ] All schema validation tests pass (including `model_validator` for `WheelCandidateReport`).
-- [ ] No existing tests broken.
+- [x] All six schemas added to `schemas.py` with render helpers.
+- [x] `STRUCTURED_OUTPUT_SENTINEL` constant in `structured.py`.
+- [x] Five new `Optional[str]` fields in `AgentState`.
+- [x] `config["wheel"]` sub-dict with 18 keys and env var overrides.
+- [x] `tradingagents/models/wheel_position.py` with atomic I/O.
+- [x] `load_latest_open_position` integer-sort regression test passes (cycle-10 returned over cycle-9).
+- [x] All schema validation tests pass (including `model_validator` for `WheelCandidateReport`).
+- [x] No existing tests broken.
 
 ---
 
@@ -251,18 +251,18 @@ The feature is divided into four implementation batches. Each batch corresponds 
 | 7 | B3-T-VERIFY | `tests/test_wheel_analyst.py` (complete), `tests/test_csp_agent.py` (complete), `tests/test_cc_agent.py` (complete), `tests/test_roll_agent.py` (complete), `tests/test_risk_debate_injection.py` (complete), `tests/test_past_context_injection.py` (complete) | **TEST VERIFY (TDD Green phase).** Complete all stubs. Run full test suite; all B3 tests must pass. Confirm: all 12 fallback test cases pass (PROP-FALLBACK-01–12); all sentinel assertions import `STRUCTURED_OUTPUT_SENTINEL` from `structured.py` — no hardcoded string literals allowed (ADR-WHEEL-04, enforced); filter inclusivity boundary tests pass; Rule priority tests pass (Rule3 > Rule1 and Rule2 > Rule1); prompt-content assertions pass; past-context injection positive test passes for multi-cycle scenario; **past-context injection negative test passes (TE-v2-F-01): `_build_options_context` returns no `Past Cycle Performance` section when `cycle_history` is empty or `WheelPosition` is absent (first-cycle / equity-only path)**; all `test_past_context_injection.py` tests inject `_position_loader` and do not access the real `positions_dir` (TE-v2-F-02 / ADR-WHEEL-05). | B3-T1, B3-T2, B3-T3, B3-T4, B3-T5, B3-T6 | REQ-SCREEN-01, REQ-TRADE-01, REQ-TRADE-03, REQ-LIFE-03, REQ-LIFE-05 AC3; REQ-NFR-05; ADR-WHEEL-04; ADR-WHEEL-05 |
 
 **Batch 3 Definition of Done:**
-- [ ] `tradingagents/agents/options/` package created with `__init__.py`, `csp_agent.py`, `cc_agent.py`, `roll_agent.py`.
-- [ ] `tradingagents/agents/analysts/wheel_analyst.py` created.
-- [ ] All four agents use `STRUCTURED_OUTPUT_SENTINEL` (imported from `structured.py`, never hardcoded).
-- [ ] All three-layer fallback tests pass (12 test cases across 4 agents). All sentinel assertions import the constant — no hardcoded string literals in any test file.
-- [ ] Filter inclusivity boundary tests pass (Delta lower and upper bounds, inclusive).
-- [ ] RollCheckAgent priority resolution test: Rule3 > Rule1 and Rule2 > Rule1 both verified.
-- [ ] Prompt-content assertion tests pass for risk debate injection (including `mid_premium`, `probability_of_profit`, `breakeven_price`, `earnings_clear` fields).
-- [ ] Past-context injection positive test passes: when `WheelPosition.cycle_history` contains a prior cycle, `_build_options_context` output contains `cycle_pnl` and `cycle_annualised_return_pct` formatted to 2 decimal places (REQ-LIFE-05 AC3).
-- [ ] Past-context injection negative test passes: `_build_options_context` returns no `Past Cycle Performance` section when `cycle_history` is empty or `WheelPosition` is absent — prompt must be identical to a run with no `WheelPosition` at all (first-cycle / equity-only path; TE-v2-F-01).
-- [ ] Past-context injection unit tests inject `_position_loader`; no test in `test_past_context_injection.py` writes to the real `positions_dir` (TE-v2-F-02; ADR-WHEEL-05).
-- [ ] CcAgent uses `recommended_dte_low = 28` as DTE lower bound in `_filter_cc_candidates` (DEC-PLAN-01).
-- [ ] All existing tests still pass.
+- [x] `tradingagents/agents/options/` package created with `__init__.py`, `csp_agent.py`, `cc_agent.py`, `roll_agent.py`.
+- [x] `tradingagents/agents/analysts/wheel_analyst.py` created.
+- [x] All four agents use `STRUCTURED_OUTPUT_SENTINEL` (imported from `structured.py`, never hardcoded).
+- [x] All three-layer fallback tests pass (12 test cases across 4 agents). All sentinel assertions import the constant — no hardcoded string literals in any test file.
+- [x] Filter inclusivity boundary tests pass (Delta lower and upper bounds, inclusive).
+- [x] RollCheckAgent priority resolution test: Rule3 > Rule1 and Rule2 > Rule1 both verified.
+- [x] Prompt-content assertion tests pass for risk debate injection (including `mid_premium`, `probability_of_profit`, `breakeven_price`, `earnings_clear` fields).
+- [x] Past-context injection positive test passes: when `WheelPosition.cycle_history` contains a prior cycle, `_build_options_context` output contains `cycle_pnl` and `cycle_annualised_return_pct` formatted to 2 decimal places (REQ-LIFE-05 AC3).
+- [x] Past-context injection negative test passes: `_build_options_context` returns no `Past Cycle Performance` section when `cycle_history` is empty or `WheelPosition` is absent — prompt must be identical to a run with no `WheelPosition` at all (first-cycle / equity-only path; TE-v2-F-01).
+- [x] Past-context injection unit tests inject `_position_loader`; no test in `test_past_context_injection.py` writes to the real `positions_dir` (TE-v2-F-02; ADR-WHEEL-05).
+- [x] CcAgent uses `recommended_dte_low = 28` as DTE lower bound in `_filter_cc_candidates` (DEC-PLAN-01).
+- [x] All existing tests still pass.
 
 ---
 
@@ -282,20 +282,20 @@ The feature is divided into four implementation batches. Each batch corresponds 
 | 6 | B4-T-VERIFY | `tests/test_graph_routing.py` (complete), `tests/test_wheel_nodes.py` (complete), `tests/test_cli_wheel.py` (complete) | **TEST VERIFY (TDD Green phase).** Complete all stubs. Run full test suite; all B4 tests must pass. Confirm: **Equity-passthrough test** (`PROP-ROUTE-02`) carries `@pytest.mark.integration` (TE-F-03); **Full screening-path test** asserts `wheel_phase="screening"` → `first_analyst_node` returned AND WheelAnalyst + CspAgent nodes are registered and reachable from the screening entry point (TE-F-04, ADR-WHEEL-03); **`csp_open` routing test passes (TE-v2-F-03): `wheel_phase="csp_open"` → `route_wheel_phase` returns `"roll_check_agent"` (DEC-PLAN-02)**; `cycle_annualised_return_pct` = 33.21%; `wheel_cycle_summary` returned state asserts `wheel_phase == None` (PM-v2-F-01); `WheelStateError` on missing position; CLI unknown-phase warning in `console.export_text()`; `"No open wheel positions"` string. All existing tests still pass. | B4-T1, B4-T2, B4-T3, B4-T4, B4-T5 | REQ-LIFE-01 AC1–AC6; REQ-SCREEN-03; REQ-LIFE-06; ADR-WHEEL-02, ADR-WHEEL-03, ADR-WHEEL-05; PROP-ROUTE-01, PROP-ROUTE-02; DEC-PLAN-02 |
 
 **Batch 4 Definition of Done:**
-- [ ] `wheel_nodes.py` created with `WheelStateError` and `wheel_cycle_summary` node.
-- [ ] `conditional_logic.py` extended with `route_wheel_phase()` and `_load_position()`. All six non-None transitions routed (DEC-PLAN-02: automated transitions).
-- [ ] `setup.py` modified: `START → wheel_router` conditional edge replaces direct edge (line 89).
-- [ ] `"wheel"` in `selected_analysts` conditionally adds `wheel_analyst` node and routes `"Trader" → "wheel_analyst" → "Aggressive Analyst"`.
-- [ ] `tools_options` ToolNode registered in graph.
-- [ ] CLI panel for WheelCandidateReport renders with correct strings for both approved and rejected cases.
-- [ ] `wheel-status` CLI sub-command outputs correct Rich tables and `"No open wheel positions"` string.
-- [ ] Equity-passthrough integration test passes, marked `@pytest.mark.integration`: `wheel_phase=None` → first analyst node, no options nodes visited, no wheel state fields written.
-- [ ] Full screening-path test passes: `wheel_phase="screening"` → `first_analyst_node`, WheelAnalyst and CspAgent nodes registered and reachable (not just router return value check).
-- [ ] `csp_open` routing test passes: `wheel_phase="csp_open"` → `route_wheel_phase` returns `"roll_check_agent"` (TE-v2-F-03; DEC-PLAN-02 automated transition).
-- [ ] `cycle_annualised_return_pct` test passes with 33.21% (not 33.25%).
-- [ ] `wheel_cycle_summary` returned state asserts `wheel_phase == None` (not `"screening"`) — next execution re-enters via `wheel_router` which re-evaluates fresh (PM-v2-F-01).
-- [ ] CLI unknown-phase warning appears in `console.export_text()` output (not just `caplog`).
-- [ ] All existing tests still pass.
+- [x] `wheel_nodes.py` created with `WheelStateError` and `wheel_cycle_summary` node.
+- [x] `conditional_logic.py` extended with `route_wheel_phase()` and `_load_position()`. All six non-None transitions routed (DEC-PLAN-02: automated transitions).
+- [x] `setup.py` modified: `START → wheel_router` conditional edge replaces direct edge (line 89).
+- [x] `"wheel"` in `selected_analysts` conditionally adds `wheel_analyst` node and routes `"Trader" → "wheel_analyst" → "Aggressive Analyst"`.
+- [x] `tools_options` ToolNode registered in graph.
+- [x] CLI panel for WheelCandidateReport renders with correct strings for both approved and rejected cases.
+- [x] `wheel-status` CLI sub-command outputs correct Rich tables and `"No open wheel positions"` string.
+- [x] Equity-passthrough integration test passes, marked `@pytest.mark.integration`: `wheel_phase=None` → first analyst node, no options nodes visited, no wheel state fields written.
+- [x] Full screening-path test passes: `wheel_phase="screening"` → `first_analyst_node`, WheelAnalyst and CspAgent nodes registered and reachable (not just router return value check).
+- [x] `csp_open` routing test passes: `wheel_phase="csp_open"` → `route_wheel_phase` returns `"roll_check_agent"` (TE-v2-F-03; DEC-PLAN-02 automated transition).
+- [x] `cycle_annualised_return_pct` test passes with 33.21% (not 33.25%).
+- [x] `wheel_cycle_summary` returned state asserts `wheel_phase == None` (not `"screening"`) — next execution re-enters via `wheel_router` which re-evaluates fresh (PM-v2-F-01).
+- [x] CLI unknown-phase warning appears in `console.export_text()` output (not just `caplog`).
+- [x] All existing tests still pass.
 
 ---
 
@@ -399,25 +399,25 @@ The REQ v0.2.0 AC3a states "approximately 33.25%". The arithmetically correct va
 
 The entire wheel-options-trading feature is complete when:
 
-- [ ] All four batches (B1–B4) are complete, with each batch following TDD order (stub → implement → verify).
-- [ ] All unit tests pass (no `@pytest.mark.smoke` tests required for CI pass).
-- [ ] The equity-passthrough integration test passes, marked `@pytest.mark.integration`: a graph invocation with `wheel_phase=None` produces output identical to a pre-feature equity-only invocation (PROP-ROUTE-02).
-- [ ] The full screening-path test passes: `wheel_phase="screening"` routes to first analyst node AND WheelAnalyst + CspAgent are registered and reachable (TE-F-04).
-- [ ] The integer-sort regression test passes (PROP-POSN-01).
-- [ ] All 12 structured-output fallback test cases pass (PROP-FALLBACK-01 through PROP-FALLBACK-12).
-- [ ] `STRUCTURED_OUTPUT_SENTINEL` is imported (never hardcoded) in all four agents, in CLI display, and in all test files that assert on the sentinel value (ADR-WHEEL-04).
-- [ ] IV environment label in CLI annotated as realised-volatility-based (ADR-WHEEL-01).
-- [ ] Zero-variance flat-range note surfaced in `iv_assessment` and CLI when it fires (ADR-WHEEL-01).
-- [ ] `cycle_annualised_return_pct` test asserts 33.21% with discrepancy comment (TSPEC §9.4).
-- [ ] CcAgent `_filter_cc_candidates` uses `recommended_dte_low = 28` as DTE lower bound (DEC-PLAN-01).
-- [ ] Past-context injection positive test passes: `_build_options_context` includes `cycle_pnl` and `cycle_annualised_return_pct` from `WheelPosition.cycle_history` on subsequent wheel cycles (REQ-LIFE-05 AC3).
-- [ ] Past-context injection negative test passes: `_build_options_context` returns no `Past Cycle Performance` section when `cycle_history` is empty or `WheelPosition` is absent — prompt identical to no-WheelPosition run (TE-v2-F-01).
-- [ ] Past-context injection unit tests use `_position_loader` injectable; no test writes to real `positions_dir` (TE-v2-F-02; ADR-WHEEL-05).
-- [ ] `csp_open` routing test passes: `wheel_phase="csp_open"` routes to `roll_check_agent` via `route_wheel_phase` (TE-v2-F-03; DEC-PLAN-02).
-- [ ] `wheel_cycle_summary` returned state has `wheel_phase == None`; next cycle re-enters via `wheel_router` on re-invocation (PM-v2-F-01).
-- [ ] Phase transitions are fully automated: agents set `wheel_phase` in returned state on each transition event (DEC-PLAN-02).
-- [ ] CLI unknown-phase warning appears in console output (not just `caplog`), per ADR-WHEEL-02.
-- [ ] No existing tests broken (REQ-NFR-01 backward compatibility).
-- [ ] All new `config["wheel"]` keys have inline comments (REQ-NFR-07).
-- [ ] PROPERTIES document references this PLAN for property-to-task traceability.
-- [ ] REQ v0.3.0 is merged (prerequisite gate cleared).
+- [x] All four batches (B1–B4) are complete, with each batch following TDD order (stub → implement → verify).
+- [x] All unit tests pass (no `@pytest.mark.smoke` tests required for CI pass).
+- [x] The equity-passthrough integration test passes, marked `@pytest.mark.integration`: a graph invocation with `wheel_phase=None` produces output identical to a pre-feature equity-only invocation (PROP-ROUTE-02).
+- [x] The full screening-path test passes: `wheel_phase="screening"` routes to first analyst node AND WheelAnalyst + CspAgent are registered and reachable (TE-F-04).
+- [x] The integer-sort regression test passes (PROP-POSN-01).
+- [x] All 12 structured-output fallback test cases pass (PROP-FALLBACK-01 through PROP-FALLBACK-12).
+- [x] `STRUCTURED_OUTPUT_SENTINEL` is imported (never hardcoded) in all four agents, in CLI display, and in all test files that assert on the sentinel value (ADR-WHEEL-04).
+- [x] IV environment label in CLI annotated as realised-volatility-based (ADR-WHEEL-01).
+- [x] Zero-variance flat-range note surfaced in `iv_assessment` and CLI when it fires (ADR-WHEEL-01).
+- [x] `cycle_annualised_return_pct` test asserts 33.21% with discrepancy comment (TSPEC §9.4).
+- [x] CcAgent `_filter_cc_candidates` uses `recommended_dte_low = 28` as DTE lower bound (DEC-PLAN-01).
+- [x] Past-context injection positive test passes: `_build_options_context` includes `cycle_pnl` and `cycle_annualised_return_pct` from `WheelPosition.cycle_history` on subsequent wheel cycles (REQ-LIFE-05 AC3).
+- [x] Past-context injection negative test passes: `_build_options_context` returns no `Past Cycle Performance` section when `cycle_history` is empty or `WheelPosition` is absent — prompt identical to no-WheelPosition run (TE-v2-F-01).
+- [x] Past-context injection unit tests use `_position_loader` injectable; no test writes to real `positions_dir` (TE-v2-F-02; ADR-WHEEL-05).
+- [x] `csp_open` routing test passes: `wheel_phase="csp_open"` routes to `roll_check_agent` via `route_wheel_phase` (TE-v2-F-03; DEC-PLAN-02).
+- [x] `wheel_cycle_summary` returned state has `wheel_phase == None`; next cycle re-enters via `wheel_router` on re-invocation (PM-v2-F-01).
+- [x] Phase transitions are fully automated: agents set `wheel_phase` in returned state on each transition event (DEC-PLAN-02).
+- [x] CLI unknown-phase warning appears in console output (not just `caplog`), per ADR-WHEEL-02.
+- [x] No existing tests broken (REQ-NFR-01 backward compatibility).
+- [x] All new `config["wheel"]` keys have inline comments (REQ-NFR-07).
+- [x] PROPERTIES document references this PLAN for property-to-task traceability.
+- [x] REQ v0.3.0 is merged (prerequisite gate cleared).

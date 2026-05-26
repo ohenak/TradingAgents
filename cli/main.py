@@ -1283,5 +1283,193 @@ def analyze(
     run_analysis(checkpoint=checkpoint)
 
 
+def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
+    """Render a WheelCandidateReport as a Rich panel.
+
+    Style: bold red when approved=False, default when approved=True.
+    Surfaces ADR-WHEEL-01 zero-variance flat-range note in iv_assessment.
+    """
+    from tradingagents.agents.schemas import WheelCandidateReport
+
+    approved = None
+    try:
+        report = WheelCandidateReport.model_validate_json(report_raw)
+        approved = report.approved
+    except Exception:
+        pass
+
+    border_style = "bold red" if approved is False else "green"
+
+    # TSPEC §7.1 template
+    panel_content = f"## WheelCandidateReport\n\n{report_raw}"
+
+    console_obj.print(
+        Panel(
+            Markdown(panel_content),
+            title="Wheel Suitability",
+            border_style=border_style,
+            padding=(1, 2),
+        )
+    )
+
+
+@app.command(name="wheel-status")
+def wheel_status(
+    positions_dir: str = typer.Option(
+        "",
+        "--positions-dir",
+        help="Override the positions directory (default: from config).",
+    ),
+):
+    """Display open and completed wheel positions.
+
+    Shows two tables:
+    1. Open positions (phases: csp_open, stock_owned, cc_open)
+    2. Completed cycles
+
+    Outputs 'No open wheel positions' when no open positions are found
+    (REQ-LIFE-06 AC2).
+    """
+    import glob
+    import os
+
+    from tradingagents.models.wheel_position import WheelPosition
+
+    # Resolve positions dir
+    pos_dir = positions_dir
+    if not pos_dir:
+        pos_dir = DEFAULT_CONFIG.get("wheel", {}).get("positions_dir", "memory/wheel_positions")
+
+    # Glob all position files
+    pattern = os.path.join(pos_dir, "*.json")
+    files = glob.glob(pattern)
+
+    if not files:
+        console.print("No open wheel positions")
+        return
+
+    open_positions = []
+    completed_positions = []
+
+    for fp in files:
+        try:
+            import json
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            pos = WheelPosition(**data)
+            if pos.wheel_phase == "cycle_complete":
+                completed_positions.append(pos)
+            else:
+                open_positions.append(pos)
+        except Exception as e:
+            console.print(f"[yellow]Warning: could not load {fp}: {e}[/yellow]")
+
+    # Table 1: Open positions
+    if not open_positions:
+        console.print("No open wheel positions")
+    else:
+        console.print(
+            Panel("[bold]Open Wheel Positions[/bold]", border_style="cyan")
+        )
+        open_table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            box=box.SIMPLE_HEAD,
+        )
+        open_table.add_column("Ticker", style="cyan")
+        open_table.add_column("Phase", style="green")
+        open_table.add_column("Strike")
+        open_table.add_column("Expiration")
+        open_table.add_column("DTE")
+        open_table.add_column("Cost Basis")
+        open_table.add_column("Premium Collected")
+        open_table.add_column("P&L")
+
+        for pos in open_positions:
+            # Determine active strike/expiration
+            strike = ""
+            expiry = ""
+            dte_str = ""
+            if pos.wheel_phase in ("csp_open",):
+                strike = str(pos.csp_strike or "")
+                expiry = pos.csp_expiration or ""
+            elif pos.wheel_phase in ("cc_open",):
+                strike = str(pos.cc_strike or "")
+                expiry = pos.cc_expiration or ""
+
+            # Compute DTE
+            if expiry:
+                try:
+                    from datetime import date as date_cls
+                    exp_dt = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    dte_val = (exp_dt - datetime.now().date()).days
+                    dte_str = str(dte_val)
+                except Exception:
+                    pass
+
+            cost_basis = ""
+            if pos.csp_strike and pos.csp_premium_received:
+                cost_basis = f"{pos.csp_strike - pos.csp_premium_received:.2f}"
+
+            premium = f"{pos.cumulative_premium_received:.2f}" if pos.cumulative_premium_received else "0.00"
+            pnl = f"{pos.cycle_pnl:.2f}" if pos.cycle_pnl is not None else "—"
+
+            open_table.add_row(
+                pos.ticker,
+                pos.wheel_phase or "",
+                strike,
+                expiry,
+                dte_str,
+                cost_basis,
+                premium,
+                pnl,
+            )
+
+        console.print(open_table)
+
+    # Table 2: Completed cycles
+    if completed_positions:
+        console.print(
+            Panel("[bold]Completed Wheel Cycles[/bold]", border_style="green")
+        )
+        completed_table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            box=box.SIMPLE_HEAD,
+        )
+        completed_table.add_column("Ticker", style="cyan")
+        completed_table.add_column("Cycle #")
+        completed_table.add_column("Duration (days)")
+        completed_table.add_column("Total Premium")
+        completed_table.add_column("P&L")
+        completed_table.add_column("Ann. Return %")
+
+        for pos in completed_positions:
+            ann_ret = f"{pos.cycle_annualised_return_pct:.2f}%" if pos.cycle_annualised_return_pct is not None else "—"
+            pnl = f"{pos.cycle_pnl:.2f}" if pos.cycle_pnl is not None else "—"
+            premium = f"{pos.cumulative_premium_received:.2f}" if pos.cumulative_premium_received else "0.00"
+
+            # Compute duration
+            duration = ""
+            if pos.csp_open_date and pos.call_away_date:
+                try:
+                    open_dt = datetime.strptime(pos.csp_open_date, "%Y-%m-%d")
+                    close_dt = datetime.strptime(pos.call_away_date, "%Y-%m-%d")
+                    duration = str((close_dt - open_dt).days)
+                except Exception:
+                    pass
+
+            completed_table.add_row(
+                pos.ticker,
+                str(pos.cycle_number),
+                duration,
+                premium,
+                pnl,
+                ann_ret,
+            )
+
+        console.print(completed_table)
+
+
 if __name__ == "__main__":
     app()

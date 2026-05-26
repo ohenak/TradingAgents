@@ -8,6 +8,7 @@ from .analysts.sentiment_analyst import (
     create_sentiment_analyst,
     create_social_media_analyst,  # deprecated alias kept for back-compat
 )
+from .analysts.wheel_analyst import create_wheel_analyst
 
 from .researchers.bear_researcher import create_bear_researcher
 from .researchers.bull_researcher import create_bull_researcher
@@ -20,6 +21,10 @@ from .managers.research_manager import create_research_manager
 from .managers.portfolio_manager import create_portfolio_manager
 
 from .trader.trader import create_trader
+
+from .options.csp_agent import create_csp_agent
+from .options.cc_agent import create_cc_agent
+from .options.roll_agent import create_roll_check_agent
 
 __all__ = [
     "AgentState",
@@ -39,4 +44,9 @@ __all__ = [
     "create_sentiment_analyst",
     "create_social_media_analyst",  # deprecated; will be removed in a future version
     "create_trader",
+    # Wheel options trading agents (Phase 2-4)
+    "create_wheel_analyst",
+    "create_csp_agent",
+    "create_cc_agent",
+    "create_roll_check_agent",
 ]

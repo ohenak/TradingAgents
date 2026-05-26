@@ -1,6 +1,12 @@
 from typing import Annotated
 
 # Import from vendor-specific modules
+from .y_finance_options import (
+    get_options_chain as get_yfinance_options_chain,
+    get_iv_metrics as get_yfinance_iv_metrics,
+    get_options_greeks as get_yfinance_options_greeks,
+    get_next_earnings_date as get_yfinance_next_earnings_date,
+)
 from .y_finance import (
     get_YFin_data_online,
     get_stock_stats_indicators_window,
@@ -28,6 +34,11 @@ from .alpha_vantage_common import AlphaVantageRateLimitError
 from .config import get_config
 
 # Tools organized by category
+def _stub_not_implemented(*args, **kwargs) -> str:
+    """Stub implementation for vendors that don't yet support a method."""
+    return "not implemented"
+
+
 TOOLS_CATEGORIES = {
     "core_stock_apis": {
         "description": "OHLCV stock price data",
@@ -57,7 +68,16 @@ TOOLS_CATEGORIES = {
             "get_global_news",
             "get_insider_transactions",
         ]
-    }
+    },
+    "options_data": {
+        "description": "Options chain, IV metrics, Greeks, and earnings dates",
+        "tools": [
+            "get_options_chain",
+            "get_iv_metrics",
+            "get_options_greeks",
+            "get_next_earnings_date",
+        ]
+    },
 }
 
 VENDOR_LIST = [
@@ -106,6 +126,23 @@ VENDOR_METHODS = {
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+    },
+    # options_data
+    "get_options_chain": {
+        "yfinance": get_yfinance_options_chain,
+        "alpha_vantage": _stub_not_implemented,
+    },
+    "get_iv_metrics": {
+        "yfinance": get_yfinance_iv_metrics,
+        "alpha_vantage": _stub_not_implemented,
+    },
+    "get_options_greeks": {
+        "yfinance": get_yfinance_options_greeks,
+        "alpha_vantage": _stub_not_implemented,
+    },
+    "get_next_earnings_date": {
+        "yfinance": get_yfinance_next_earnings_date,
+        "alpha_vantage": _stub_not_implemented,
     },
 }
 

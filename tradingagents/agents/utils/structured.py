@@ -25,6 +25,14 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# ADR-WHEEL-04 sentinel constant
+# ---------------------------------------------------------------------------
+# This string is a CONTRACT — do NOT change it without updating all consumers:
+# wheel agents (wheel_analyst, csp_agent, cc_agent, roll_agent), CLI display,
+# and all test files that assert on the sentinel value.
+STRUCTURED_OUTPUT_SENTINEL = "Structured output failed — safe fallback applied."
+
 T = TypeVar("T", bound=BaseModel)
 
 
