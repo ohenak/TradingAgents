@@ -162,18 +162,26 @@ class TestUnknownPhase:
 
 @pytest.mark.integration
 class TestEquityPassthroughIntegration:
-    """PROP-ROUTE-01: full graph integration test — wheel_phase=None routes to equity path.
+    """PROP-ROUTE-01 / PROP-ROUTE-09: route_wheel_phase() isolation tests.
 
-    Verifies: (a) no options tool nodes are invoked, (b) output wheel_phase is still None.
-    Uses a compiled LangGraph with mocked LLM nodes so no real LLM calls are made.
+    Scope limitation: these tests exercise route_wheel_phase() in isolation only.
+    They do NOT compile or invoke a full LangGraph instance; no tool-call counts
+    are verified against a real graph execution, and no output fields
+    (market_report, fundamentals_report) are asserted.
+
+    Full compiled-graph integration for PROP-ROUTE-01 and PROP-ROUTE-09
+    (asserting zero options-tool calls and populated equity output fields) is
+    documented as GAP-06 in PROPERTIES §10 and deferred until the LangGraph
+    integration harness is available. See TE-F-01 review finding.
     """
 
     def test_wheel_phase_none_no_options_nodes_invoked(self):
-        """PROP-ROUTE-01: wheel_phase=None input → route_wheel_phase returns equity node.
+        """PROP-ROUTE-01: wheel_phase=None → route_wheel_phase returns equity entry node.
 
-        Asserts that route_wheel_phase() with wheel_phase=None never returns
-        an options-specific node name, and that wheel_phase in the output state
-        remains None (no mutation by routing).
+        Tests route_wheel_phase() isolation only (not a compiled-graph invocation).
+        Asserts the router never returns an options-specific node name when
+        wheel_phase=None, and that wheel_phase in the state dict remains None
+        (routing must not mutate state).
         """
         logic = _make_logic(first_analyst="Market Analyst")
         state = _make_state(wheel_phase=None)
