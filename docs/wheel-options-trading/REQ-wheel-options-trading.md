@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.2.0 |
+| **Version** | 0.3.0 |
 | **Created** | 2026-05-25 |
 | **Upstream** | Feasibility Analysis (ARCHITECTURE.md, FLOW_DIAGRAM.md, DEPENDENCY_GRAPH.md, CAPABILITIES.md) → **REQ** |
 | **Downstream** | FSPEC, TSPEC, PROPERTIES |
-| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-REQ.md`, `CROSS-REVIEW-test-engineer-REQ.md` |
+| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-REQ.md`, `CROSS-REVIEW-test-engineer-REQ.md`, `CROSS-REVIEW-product-manager-PLAN.md` |
 | **LEARNINGS** | `docs/wheel-options-trading/LEARNINGS-wheel-options-trading.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.3.0 | 2026-05-25 | Address PLAN cross-review PM traceability gaps (F-01, F-02): add `near_the_money_pct` and `options_lookforward_days` to §7 config table; add `csp_open_date` and `prior_analyst_bias` to REQ-LIFE-02 WheelPosition schema; correct AC3a annualised return from 33.25% to 33.21%; clarify REQ-TRADE-03 CC DTE range to 28–45 DTE with rationale |
 | 0.2.0 | 2026-05-25 | Address SE and TE cross-review v1 findings (9 High, 13 Medium, 6 Low) |
 | 0.1.0 | 2026-05-25 | Initial draft |
 
@@ -480,7 +481,7 @@ CspDecision
 A new agent `CcAgent` at `tradingagents/agents/options/cc_agent.py` generates a covered-call recommendation for a stock position that was acquired through put assignment. It receives: the assigned stock's cost basis (put strike − premium received), current market price, the analyst reports, and the full options chain. The agent selects:
 
 - **Strike** — must be ≥ cost basis (so called-away is profitable), targeting a call Delta between `cc_target_delta_low` and `cc_target_delta_high` (default: 0.20–0.35)
-- **Expiration** — within `recommended_dte_range`, default 21–45 DTE (calendar days)
+- **Expiration** — within `recommended_dte_range`, default **28–45 DTE** (calendar days). The lower bound of 28 DTE is the point at which Theta decay acceleration begins in earnest, making it the preferred minimum horizon for premium-selling strategies. Both CSP and CC share the single `recommended_dte_low = 28` config key. Note: earlier drafts referenced "21–45 DTE" for the CC; 28 is the correct lower bound aligned to the config table default and standard wheel practice.
 - **Premium** — must meet `min_annualised_yield` on the cost basis
 
 Output: `CcDecision` schema (REQ-TRADE-04).
@@ -642,6 +643,7 @@ WheelPosition
 ├── ticker: str
 ├── wheel_phase: str                     # WheelPhase string value (str, Enum)
 ├── cycle_number: int                    # monotonically increasing per ticker
+├── csp_open_date: Optional[str]         # ISO date (YYYY-MM-DD) the initial CSP was opened; start of cycle; required for cycle_duration_days in annualised return formula
 ├── csp_strike: Optional[float]
 ├── csp_expiration: Optional[str]
 ├── csp_premium_received: Optional[float]
@@ -655,6 +657,7 @@ WheelPosition
 ├── cumulative_premium_received: float   # sum of all premiums in this cycle
 ├── cycle_pnl: Optional[float]           # realised at cycle end
 ├── cycle_annualised_return_pct: Optional[float]
+├── prior_analyst_bias: Optional[str]    # "bullish" | "neutral" | "bearish"; stores the WheelAnalyst investment_plan bias from the most recent run, used by RollCheckAgent Rule 5 to detect analyst-bias reversal
 └── notes: str
 ```
 
@@ -669,7 +672,7 @@ The position file must be updated at every phase transition. On `CYCLE_COMPLETE`
 | AC1 | System | CSP is opened at $140 strike, $2.50 premium | Position is written | `cost_basis_per_share = 137.50`, `cumulative_premium_received = 2.50` |
 | AC2 | System | CC is opened at $145 strike, $1.80 premium | Position is updated | `cumulative_premium_received = 4.30` |
 | AC3 | System | CC is called away | `CYCLE_COMPLETE` triggers | `cycle_pnl = (145 − 140 + 4.30) × 100 = 930`, `cycle_annualised_return_pct` computed |
-| AC3a | System | `cycle_pnl=930`, `csp_strike=140`, `shares_held=100`, `cycle_duration_days=73` | `cycle_annualised_return_pct` is computed | Value is approximately `33.25%` (formula: `(930 / (140 × 100)) × (365 / 73) × 100`) |
+| AC3a | System | `cycle_pnl=930`, `csp_strike=140`, `shares_held=100`, `cycle_duration_days=73` | `cycle_annualised_return_pct` is computed | Value is approximately `33.21%` (formula: `(930 / (140 × 100)) × (365 / 73) × 100 = (0.066429) × (5.0) × 100 ≈ 33.21%`) |
 | AC4 | System | Multiple concurrent wheel positions exist | Each has a distinct ticker | Each position file is written to `{positions_dir}/{ticker}-cycle-{cycle_number}.json` |
 
 ---
@@ -835,3 +838,5 @@ All under `config["wheel"]` in `default_config.py`. Env var override naming conv
 | `risk_free_rate_source` | `"yfinance_irx"` | `TRADINGAGENTS_WHEEL_RISK_FREE_RATE_SOURCE` | str | Source for BSM risk-free rate: `"yfinance_irx"` or `"static"` |
 | `risk_free_rate_static` | `0.0525` | `TRADINGAGENTS_WHEEL_RISK_FREE_RATE_STATIC` | float | Static risk-free rate (decimal, not percent) used when `risk_free_rate_source="static"` or `^IRX` is unavailable |
 | `positions_dir` | `"memory/wheel_positions"` | `TRADINGAGENTS_WHEEL_POSITIONS_DIR` | str | Directory for per-position JSON files (`{ticker}-cycle-{N}.json`) |
+| `near_the_money_pct` | `0.05` | `TRADINGAGENTS_WHEEL_NEAR_THE_MONEY_PCT` | float | Fraction of spot price within which a strike is considered 'near the money' for WheelAnalyst screening |
+| `options_lookforward_days` | `45` | `TRADINGAGENTS_WHEEL_OPTIONS_LOOKFORWARD_DAYS` | int | Maximum DTE horizon when scanning the options chain for suitable CSP/CC candidates |

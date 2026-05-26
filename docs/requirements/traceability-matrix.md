@@ -1,6 +1,6 @@
 # Requirements Traceability Matrix
 
-_Last updated: 2026-05-25_
+_Last updated: 2026-05-25 (REQ v0.3.0 — no new IDs; §7 config table and REQ-LIFE-02 schema updated in place)_
 
 ## Feature: Wheel Options Trading
 
