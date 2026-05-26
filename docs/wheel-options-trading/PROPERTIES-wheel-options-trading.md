@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | TE-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-26 |
 | **Upstream** | REQ-wheel-options-trading.md v0.3.0 → FSPEC-wheel-options-trading.md v0.3.0 → TSPEC-wheel-options-trading.md v0.2.0 → PLAN-wheel-options-trading.md v0.3.0 → DECISIONS-wheel-options-trading.md v0.3.0 → **PROPERTIES** |
 | **Downstream** | `IMPL tests` |
-| **Cross-Reviews** | *(none yet — will be linked when reviews are filed)* |
+| **Cross-Reviews** | `CROSS-REVIEW-product-manager-PROPERTIES.md`, `CROSS-REVIEW-software-engineer-PROPERTIES.md` |
 | **LEARNINGS** | `docs/wheel-options-trading/LEARNINGS-wheel-options-trading.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.2.0 | 2026-05-26 | Address PM cross-review (F-01 through F-06) and SE cross-review (F-01 through F-08): add PROP-SCREEN-07/08/09 (rejection reason substrings), PROP-DATA-17 (shortened lookback), fix PROP-SCREEN-02 source attribution, add PROP-TRADE-14 (nearest-delta relaxation note), add PROP-SCREEN-10/11 (progressive relaxation), add PROP-SCREEN-06 (all-five-criteria positive approval), add PROP-ROUTE-10 (csp_open guard), add PROP-LIFE-12 (prior_analyst_bias persistence); fix PROP-LIFE-07 test method, fix PROP-DATA-08 delta tolerance to ±0.0005, fix PROP-SCREEN-06 bind_structured test method, add PROP-DATA-13 precondition note, fix PROP-LIFE-03 callable, fix PROP-FALLBACK-13 test method to ast.parse; also fix stale "18+" count in PROP-CONFIG-01, fix PROP-DATA-02 boundary wording, rename old PROP-SCREEN-06/07/08 to PROP-SCREEN-12/13/14 to make room for new numbers |
 | 0.1.0 | 2026-05-26 | Initial PROPERTIES document |
 
 ---
@@ -25,7 +26,7 @@
 
 This document defines the testable properties (invariants, state-machine rules, mathematical properties, and interface contracts) that the Wheel Options Trading feature must satisfy. Each property maps to at least one source requirement or TSPEC section and specifies how it is verified.
 
-Properties are organised into six domains:
+Properties are organised into seven domains:
 
 | Domain | Prefix | Covers |
 |---|---|---|
@@ -63,7 +64,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-DATA-01 AC1, AC4; FSPEC-WHEEL-01; TSPEC §2.1.1 |
-| **Test method** | Use `option_chain_fixture` with three expirations: one inside the window, one exactly on the boundary, one outside. (a) Assert all three appear in no-`expiry_date` call for boundary and inside expirations. (b) Assert only the requested expiration appears when `expiry_date` is provided. |
+| **Test method** | Use `option_chain_fixture` with three expirations: one inside the window, one exactly on the boundary, one outside. (a) Assert exactly two expirations appear (inside and boundary); assert the outside expiration does NOT appear. (b) Assert only the requested expiration appears when `expiry_date` is provided. |
 
 ---
 
@@ -137,11 +138,11 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-DATA-08 |
-| **Description** | `get_options_greeks` BSM numerical anchor: given `S=100, K=100, r=0.05, σ=0.20, T=30/365`, the returned `Delta_put` must be approximately `−0.4602` (tolerance ±0.001). |
+| **Description** | `get_options_greeks` BSM numerical anchor: given `S=100, K=100, r=0.05, σ=0.20, T=30/365`, the returned `Delta_put` must be approximately `−0.4602` (tolerance ±0.0005). |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | TSPEC §2.1.3 BSM numeric verification; REQ-DATA-03 |
-| **Test method** | Call `get_options_greeks` using test seams `_spot_price=100.0, _risk_free_rate=0.05, _sigma=0.20` for a put option with `strike=100`, `expiry_date = curr_date + 30 days`, `option_type="put"`. Parse the returned string for the Delta value. Assert `abs(delta - (-0.4602)) <= 0.001`. |
+| **Source** | TSPEC §2.1.3 BSM numeric verification ("tolerance ±0.0005 on Delta"); REQ-DATA-03 |
+| **Test method** | Call `get_options_greeks` using test seams `_spot_price=100.0, _risk_free_rate=0.05, _sigma=0.20` for a put option with `strike=100`, `expiry_date = curr_date + 30 days`, `option_type="put"`. Parse the returned string for the Delta value. Assert `abs(delta - (-0.4602)) <= 0.0005`. |
 
 ---
 
@@ -167,7 +168,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-DATA-03 AC2 |
-| **Test method** | Call with `_spot_price = _strike`, a reasonable σ, `option_type="put"`. Assert `-0.55 < delta < -0.45`. |
+| **Test method** | Call with `_spot_price = _strike = 100.0`, `_sigma=0.20`, `T=30/365` (via `expiry_date = curr_date + 30 days`), `option_type="put"`. Assert `-0.55 < delta < -0.45`. |
 
 ---
 
@@ -206,7 +207,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-DATA-03 AC7; TSPEC §2.1.3 (risk-free rate fallback) |
-| **Test method** | Use `_risk_free_rate=None`, mock `yf.Ticker("^IRX")` to raise `Exception`. Assert the returned string contains `"using static risk-free rate"` and the computation completes without raising. |
+| **Test method** | **Precondition:** set `config["wheel"]["risk_free_rate_source"] = "yfinance_irx"` (NOT `"static"`) before running the test to ensure the `^IRX` fetch path is exercised rather than the static shortcut. Use `_risk_free_rate=None` (so the test seam is not engaged), mock `yf.Ticker("^IRX")` to raise `Exception`. Assert the returned string contains `"using static risk-free rate"` and the computation completes without raising. |
 
 ---
 
@@ -249,6 +250,19 @@ Properties are organised into six domains:
 
 ---
 
+### PROP-DATA-17
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-DATA-17 |
+| **Description** | When fewer than `lookback_days` trading days of OHLCV data are available (`n_available < lookback_days`), `get_iv_metrics` must use the available data only and the returned string must contain a note indicating the shortened lookback (e.g., containing `"days"` or `"lookback"` or `"available"`). The computation must still complete and return valid `iv_rank` and `iv_percentile` values in `[0, 100]`. |
+| **Type** | Unit |
+| **Level** | P0 (must-pass) |
+| **Source** | REQ-DATA-02 AC2; FSPEC-WHEEL-02 step 3a; TSPEC §2.1.2 step 14 ("Include `'Lookback shortened to {n_available} trading days'` when `n_available < lookback_days`") |
+| **Test method** | Call `get_iv_metrics(ticker, date, lookback_days=252, iv_series=<series of length 30>)` (injecting a short series via the test seam). Assert the returned string contains at least one of the substrings `"days"`, `"lookback"`, or `"available"` (case-insensitive). Assert the returned string also contains `iv_rank` and `iv_percentile` values that are numeric and in `[0, 100]`. Assert no exception is raised. |
+
+---
+
 ## 3. PROP-SCREEN — WheelAnalyst / WheelCandidateReport Properties
 
 ### PROP-SCREEN-01
@@ -272,7 +286,7 @@ Properties are organised into six domains:
 | **Description** | When `approved=True`, `recommended_strike_range` must have exactly two elements, both `> 0`, with `strike_range[0] < strike_range[1]`. The `model_validator` in `WheelCandidateReport` enforces this at construction time. |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | REQ-SCREEN-02 AC2; FSPEC-WHEEL-03 step 8c; TSPEC §3.3 `model_validator` |
+| **Source** | FSPEC-WHEEL-03 step 8c; TSPEC §3.3 `model_validator` |
 | **Test method** | (a) Construct `WheelCandidateReport(approved=True, recommended_strike_range=[95.0, 100.0], ...)` — assert no error. (b) Attempt to construct with `approved=True, recommended_strike_range=[0.0, 0.0]` — assert `ValidationError` is raised. (c) Attempt with `approved=True, recommended_strike_range=[105.0, 100.0]` (low > high) — assert `ValidationError` is raised. |
 
 ---
@@ -282,11 +296,11 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-SCREEN-03 |
-| **Description** | When `approved=False`, `rejection_reason` must be a non-empty string. The `model_validator` in `WheelCandidateReport` enforces this at construction time. |
+| **Description** | When `approved=True`, `rejection_reason` must be `None`. When `approved=False`, `rejection_reason` must be a non-empty string. The `model_validator` in `WheelCandidateReport` enforces this at construction time. |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | REQ-SCREEN-02 AC3; TSPEC §3.3 `model_validator` |
-| **Test method** | (a) Construct `WheelCandidateReport(approved=False, rejection_reason="IV too low", ...)` — assert no error. (b) Attempt to construct with `approved=False, rejection_reason=None` — assert `ValidationError`. (c) Attempt with `approved=False, rejection_reason=""` — assert `ValidationError`. |
+| **Source** | REQ-SCREEN-02 AC2, AC3; TSPEC §3.3 `model_validator` |
+| **Test method** | (a) Construct `WheelCandidateReport(approved=True, rejection_reason=None, ...)` — assert no error. (b) Construct `WheelCandidateReport(approved=False, rejection_reason="IV too low", ...)` — assert no error. (c) Attempt to construct with `approved=False, rejection_reason=None` — assert `ValidationError`. (d) Attempt with `approved=False, rejection_reason=""` — assert `ValidationError`. |
 
 ---
 
@@ -321,11 +335,11 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-SCREEN-06 |
-| **Description** | `WheelAnalyst` must call `bind_structured` with exactly three arguments: `(llm, WheelCandidateReport, "wheel_analyst")`. Omitting `agent_name` raises `TypeError` at construction time. |
+| **Description** | When all five WheelAnalyst screening criteria pass (`iv_rank >= min_iv_rank`, at least one NTM strike meets liquidity constraints, earnings sufficiently clear, `spot_price <= max_wheel_stock_price`, analyst consensus is bullish/neutral), `WheelCandidateReport.approved` must be `True`. |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | FSPEC-WHEEL-03; TSPEC §5.1; ADR-WHEEL-04 (bind_structured three-arg contract) |
-| **Test method** | Inspect the factory function source or use `inspect.signature` to assert `bind_structured` is called with three positional arguments matching `(llm, WheelCandidateReport, "wheel_analyst")`. Alternatively, mock `bind_structured` and assert it was called once with the exact arguments. |
+| **Source** | REQ-SCREEN-01 AC1; FSPEC-WHEEL-03 step 7a |
+| **Test method** | Mock all four data tools to return passing values (iv_rank=60, liquidity passes, no near-term earnings, spot=$200 with max=$500, investment_plan="Hold"). Mock LLM to return a `WheelCandidateReport` with `approved=True`. Run `WheelAnalyst`. Assert `WheelCandidateReport.approved == True`. |
 
 ---
 
@@ -334,11 +348,11 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-SCREEN-07 |
-| **Description** | When `"wheel"` is not in `selected_analysts`, the `WheelAnalyst` node must be absent from the compiled graph, and the existing equity pipeline must run without any wheel-related state changes. |
-| **Type** | Integration |
+| **Description** | When `WheelCandidateReport.approved=False` and the rejection is due to insufficient liquidity (all near-the-money strikes have OI below threshold), `rejection_reason` must contain `"Insufficient liquidity"` (case-insensitive substring match). |
+| **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | REQ-SCREEN-01 AC5; REQ-NFR-01; FSPEC-WHEEL-03 business rules |
-| **Test method** | Build graph with `selected_analysts` not containing `"wheel"`. Invoke graph with `wheel_phase=None`. Assert `"wheel_analyst"` node is not in `workflow.nodes`. Assert output `AgentState` has no `wheel_candidate_report` key set. |
+| **Source** | REQ-SCREEN-01 AC6; FSPEC-WHEEL-03 business rules |
+| **Test method** | Mock `get_options_chain` to return a chain where all NTM strikes have `openInterest < min_chain_oi`. Mock LLM to return `approved=False` with a `rejection_reason` containing the required substring. Run `WheelAnalyst`. Assert `WheelCandidateReport.approved == False`. Assert `"insufficient liquidity"` appears in `rejection_reason.lower()`. |
 
 ---
 
@@ -347,6 +361,84 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-SCREEN-08 |
+| **Description** | When `WheelCandidateReport.approved=False` and the rejection is due to bid-ask spread too wide (all NTM strikes have spread above `max_chain_spread_pct`), `rejection_reason` must contain `"Chain spread too wide"` (case-insensitive substring match). |
+| **Type** | Unit |
+| **Level** | P0 (must-pass) |
+| **Source** | REQ-SCREEN-01 AC7; FSPEC-WHEEL-03 business rules |
+| **Test method** | Mock `get_options_chain` to return a chain where all NTM strikes have `(ask - bid) / mid > max_chain_spread_pct / 100`. Mock LLM to return `approved=False` with a `rejection_reason` containing the required substring. Assert `"chain spread too wide"` appears in `rejection_reason.lower()`. |
+
+---
+
+### PROP-SCREEN-09
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-09 |
+| **Description** | When `WheelCandidateReport.approved=False` and the rejection is due to stock price exceeding account affordability (`spot_price > max_wheel_stock_price`), `rejection_reason` must contain `"Stock price exceeds cash management limit"` (case-insensitive substring match). |
+| **Type** | Unit |
+| **Level** | P0 (must-pass) |
+| **Source** | REQ-SCREEN-01 AC8; FSPEC-WHEEL-03 business rules |
+| **Test method** | Mock spot price fetch to return $600 with `config["wheel"]["max_wheel_stock_price"] = 500`. Mock LLM to return `approved=False` with the required rejection substring. Assert `"stock price exceeds cash management limit"` appears in `rejection_reason.lower()`. |
+
+---
+
+### PROP-SCREEN-10
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-10 |
+| **Description** | When the WheelAnalyst yield filter (Criterion 3 threshold) is relaxed because no candidate met the minimum yield, the approved candidate report must contain a yield-filter-relaxed note in `iv_assessment` (or `rationale`). `WheelCandidateReport.approved` must be `True` for the relaxed candidate. |
+| **Type** | Unit |
+| **Level** | P1 (should-pass) |
+| **Source** | FSPEC-WHEEL-04 §9a (yield_filter_relaxed relaxation path); FSPEC acceptance test FSPEC-TE-08 resolution |
+| **Test method** | Configure chain such that all passes Filters A and B but fail Filter C (yield too low). Run `CspAgent` (WheelAnalyst feeds into CspAgent relaxation). Assert `CspDecision.tradeable == True`. Assert `CspDecision.rationale` contains `"yield_filter_relaxed"`. |
+
+---
+
+### PROP-SCREEN-11
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-11 |
+| **Description** | When the WheelAnalyst earnings filter is relaxed (earnings check bypassed because all Filter A+B+C candidates were eliminated), the resulting `CspDecision` must be `tradeable=True` and `rationale` must contain `"earnings_filter_relaxed"`. |
+| **Type** | Unit |
+| **Level** | P1 (should-pass) |
+| **Source** | FSPEC-WHEEL-04 §9b (earnings_filter_relaxed relaxation path); FSPEC acceptance test FSPEC-TE-08 resolution |
+| **Test method** | Configure chain such that all strikes pass Filter A but fail Filters B and C (earnings straddle + yield too low). Run `CspAgent`. Assert `CspDecision.tradeable == True`. Assert `CspDecision.rationale` contains `"earnings_filter_relaxed"`. |
+
+---
+
+### PROP-SCREEN-12
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-12 |
+| **Description** | `WheelAnalyst` must call `bind_structured` with exactly three arguments: `(llm, WheelCandidateReport, "wheel_analyst")`. |
+| **Type** | Unit |
+| **Level** | P0 (must-pass) |
+| **Source** | FSPEC-WHEEL-03; TSPEC §5.1; ADR-WHEEL-04 (bind_structured three-arg contract) |
+| **Test method** | Mock `bind_structured`. Call the `create_wheel_analyst(llm)` factory function. Assert `bind_structured` was called exactly once via `mock.assert_called_once_with(llm, WheelCandidateReport, "wheel_analyst")`. Do NOT use `inspect.signature` — it returns the function's own parameter types, not call arguments, and passes vacuously. |
+
+---
+
+### PROP-SCREEN-13
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-13 |
+| **Description** | When `"wheel"` is not in `selected_analysts`, the `WheelAnalyst` node must be absent from the compiled graph, and the existing equity pipeline must run without any wheel-related state changes. |
+| **Type** | Integration |
+| **Level** | P0 (must-pass) |
+| **Source** | REQ-SCREEN-01 AC5; REQ-NFR-01; FSPEC-WHEEL-03 business rules |
+| **Test method** | Build graph with `selected_analysts` not containing `"wheel"`. Invoke graph with `wheel_phase=None`. Assert `"wheel_analyst"` node is not in `workflow.nodes`. Assert output `AgentState` has no `wheel_candidate_report` key set. |
+
+---
+
+### PROP-SCREEN-14
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-SCREEN-14 |
 | **Description** | `WheelCandidateReport.analyst_bias` must always be one of `"bullish"`, `"neutral"`, or `"bearish"`. No other value is accepted by the schema. |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
@@ -526,6 +618,19 @@ Properties are organised into six domains:
 
 ---
 
+### PROP-TRADE-14
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-TRADE-14 |
+| **Description** | When `CspDecision.tradeable=True` and the exact target-delta strike is unavailable (Filter A eliminated all strikes), the `recommended_strike` is the nearest available strike (nearest-Delta fallback) and `CspDecision.rationale` must contain the annotation `"No strike matches Delta target; nearest available:"` followed by the delta value. |
+| **Type** | Unit |
+| **Level** | P1 (should-pass) |
+| **Source** | REQ-TRADE-01 AC2; FSPEC-WHEEL-04 step 9c (nearest-Delta fallback) |
+| **Test method** | Configure `option_chain_fixture` such that all strikes have `abs(delta)` outside the `[target_csp_delta_low, target_csp_delta_high]` range (Filter A eliminates all). Mock LLM to return the nearest-Delta candidate. Assert `CspDecision.tradeable == True`. Assert `CspDecision.rationale` contains `"No strike matches Delta target; nearest available:"`. |
+
+---
+
 ## 5. PROP-LIFE — Lifecycle / State Machine Properties
 
 ### PROP-LIFE-01
@@ -563,7 +668,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-LIFE-02 AC3a; TSPEC §9.4 (formula, 33.21% verified value) |
-| **Test method** | Compute `cycle_annualised_return_pct` for the canonical example: `cycle_pnl=930, csp_strike=140, shares_held=100, cycle_duration_days=73`. Expected: approximately `33.21%`. Assert `abs(cycle_annualised_return_pct - 33.21) <= 0.01`. Note: REQ v0.2.0 stated 33.25%; 33.21% is the arithmetically correct value (TSPEC §9.4 TE-TSPEC-05). |
+| **Test method** | Test the `wheel_cycle_summary` node directly (not a standalone formula helper — the formula is inlined in the node per TSPEC §6.3). Inject an `AgentState` dict containing a `WheelPosition` fixture (via `tmp_path`) with: `cycle_pnl=930`, `csp_strike=140`, `shares_held=100`, `csp_open_date="2024-01-01"`, `call_away_date="2024-03-14"` (73 calendar days). Call `wheel_cycle_summary(state, config)`. Assert the updated `WheelPosition` (loaded from `tmp_path` after the call) has `cycle_annualised_return_pct` within `abs(value - 33.21) <= 0.01`. Note: REQ v0.2.0 stated 33.25%; 33.21% is the arithmetically correct value (TSPEC §9.4 TE-TSPEC-05). |
 
 ---
 
@@ -589,7 +694,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-LIFE-02 (atomic write requirement); TSPEC §9.3 (`save_wheel_position` implementation) |
-| **Test method** | Using `pytest tmp_path`, call `save_wheel_position(position, str(tmp_path))`. Assert the final file is a valid `WheelPosition` JSON (readable by `model_validate_json`). Assert no `.tmp` files remain in `tmp_path` after a successful write. Mock `os.replace` to raise `OSError`, assert the `.tmp` file is cleaned up. |
+| **Test method** | Using `pytest tmp_path`, call `save_wheel_position(position, str(tmp_path))`. Assert the final file is a valid `WheelPosition` JSON (readable by `model_validate_json`). Assert no `.tmp` files remain in `tmp_path` after a successful write. Mock `os.replace` to raise `OSError`, assert `len(list(tmp_path.glob("*.tmp"))) == 0` after the exception is caught. |
 
 ---
 
@@ -611,11 +716,11 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-LIFE-07 |
-| **Description** | When a prior wheel cycle exists for a ticker, `_build_options_context` (the risk debate context injector) must inject `cycle_pnl` and `cycle_annualised_return_pct` into the debate prompts. When no prior cycle exists, no "Past Cycle Performance" section must appear in the prompt. |
+| **Description** | When a prior wheel cycle exists for a ticker, `_build_options_context` must inject `CspDecision` fields (`mid_premium`, `probability_of_profit`, `delta`, `max_loss`, `earnings_clear`) into the debate prompts. When no prior cycle exists (both `csp_decision` and `cc_decision` are None), no "Past Cycle Performance" section must appear in the prompt. |
 | **Type** | Unit |
 | **Level** | P1 (should-pass) |
 | **Source** | REQ-LIFE-05 AC3; TSPEC §5.5 (`_build_options_context`); PLAN B3-T6 (past_context injection) |
-| **Test method** | (a) With prior cycle: inject `AgentState` with non-empty `csp_decision` containing `cycle_pnl=930.00` and `cycle_annualised_return_pct=33.21`. Call `_build_options_context`. Assert the returned string contains `"930.00"` and `"33.21"`. (b) Without prior cycle: inject `AgentState` with no `csp_decision` and no `cc_decision`. Assert the returned string does not contain `"Past Cycle Performance"`. |
+| **Test method** | (a) With CSP decision: construct `AgentState` with a valid `CspDecision` JSON string containing known values (`mid_premium=2.50`, `probability_of_profit=0.75`, `delta=-0.25`, `max_loss=14250.0`, `earnings_clear=True`). Call `_build_options_context(state)`. Assert the returned string contains `"2.50"` and `"0.75"` and `"0.25"` (from the known delta). (b) Without decision: construct `AgentState` with `csp_decision=None` and `cc_decision=None`. Call `_build_options_context(state)`. Assert the returned string does not contain `"Past Cycle Performance"` and is empty or equals `""`. Note: `cycle_pnl` and `cycle_annualised_return_pct` are NOT fields on `CspDecision` — those live on `WheelPosition`. Do NOT use those fields in this test. |
 
 ---
 
@@ -668,6 +773,19 @@ Properties are organised into six domains:
 | **Level** | P0 (must-pass) |
 | **Source** | ADR-WHEEL-05 (I/O-layer test isolation); PLAN (TE-v2-F-02: `_position_loader` injectable requirement) |
 | **Test method** | Inspect test code: assert all I/O-layer function tests pass a `tmp_path`-derived directory string. Assert no agent test (`test_csp_agent.py`, `test_cc_agent.py`, `test_roll_agent.py`) calls `save_wheel_position` or reads from `config["wheel"]["positions_dir"]` directly. |
+
+---
+
+### PROP-LIFE-12
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-LIFE-12 |
+| **Description** | After any `WheelAnalyst` or `RollCheckAgent` run that produces an `investment_plan` bias, the persisted `WheelPosition` file must contain `prior_analyst_bias` equal to the agent's most recent derived bias string (`"bullish"`, `"neutral"`, or `"bearish"`). |
+| **Type** | Integration |
+| **Level** | P0 (must-pass) |
+| **Source** | TSPEC §9.1 (`prior_analyst_bias` read/write, "PROPERTIES tests must cover this field"); ADR-WHEEL-05 Consequences; FSPEC-WHEEL-06 Rule 5 |
+| **Test method** | Run `RollCheckAgent` via its factory (`create_roll_check_agent`) with: a mock LLM returning known `investment_plan` with `recommendation="Buy"` (maps to bias `"bullish"`), a `WheelPosition` fixture injected via `_position_loader` lambda returning a position with `prior_analyst_bias=None`, and `tmp_path` as the positions directory. After the agent completes, load the `WheelPosition` from `tmp_path` using `load_latest_open_position`. Assert `position.prior_analyst_bias == "bullish"`. Run a second invocation with `recommendation="Sell"` (bias `"bearish"`). Assert `prior_analyst_bias == "bearish"` in the updated file. |
 
 ---
 
@@ -786,7 +904,20 @@ Properties are organised into six domains:
 | **Type** | Integration |
 | **Level** | P0 (must-pass) |
 | **Source** | REQ-NFR-01; ADR-WHEEL-03 (equity-passthrough integration test invariant) |
-| **Test method** | `@pytest.mark.integration`. Track tool calls via mock. Invoke full graph with `wheel_phase=None`. Assert call count for all four options tools is `0`. Assert `AgentState["market_report"]` and `AgentState["fundamentals_report"]` are non-empty strings. |
+| **Test method** | `@pytest.mark.integration`. Track tool calls via mock. Invoke full graph with `wheel_phase=None`. Assert call count for all four options tools is `0`. Assert `AgentState["market_report"]` and `AgentState["fundamentals_report"]` are non-empty strings. Note: shares the same test fixture as PROP-ROUTE-01; a single integration test function may satisfy both properties. |
+
+---
+
+### PROP-ROUTE-10
+
+| Field | Value |
+|---|---|
+| **Property ID** | PROP-ROUTE-10 |
+| **Description** | When `wheel_phase="csp_open"` but no `WheelPosition` with `csp_strike` set exists for the ticker, `route_wheel_phase()` must raise `WheelStateError`. |
+| **Type** | Unit |
+| **Level** | P0 (must-pass) |
+| **Source** | TSPEC §6.2 (`route_wheel_phase` `csp_open` guard: `if position is None or position.csp_strike is None: raise WheelStateError`); symmetric with PROP-ROUTE-08 for `cc_open` |
+| **Test method** | Construct `ConditionalLogic` with a mock position store that returns either `None` or a `WheelPosition` with `csp_strike=None`. Call `route_wheel_phase({"wheel_phase": "csp_open", "company_of_interest": "NVDA"})`. Assert `WheelStateError` is raised with a message containing `"csp_open"`. |
 
 ---
 
@@ -961,7 +1092,7 @@ Properties are organised into six domains:
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
 | **Source** | ADR-WHEEL-04 (sentinel constant enforcement) |
-| **Test method** | Grep the codebase for the literal string `"Structured output failed — safe fallback applied."`. Assert it appears only in `structured.py` (the constant definition). Assert all other occurrences are variable references, not string literals. |
+| **Test method** | Write a pytest test in `test_sentinel_enforcement.py`. Use `ast.parse()` + `ast.walk()` to scan the source of each of the four wheel agent files (`wheel_analyst.py`, `csp_agent.py`, `cc_agent.py`, `roll_agent.py`) and `structured.py`. Walk all `ast.Constant` nodes in the agent files. Assert that the sentinel string literal value appears in `structured.py` (in the constant definition) and does NOT appear as an `ast.Constant` node in any of the four agent source files. Also assert that each agent file contains an import statement referencing `STRUCTURED_OUTPUT_SENTINEL` from `tradingagents.agents.utils.structured`. |
 
 ---
 
@@ -972,10 +1103,10 @@ Properties are organised into six domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-CONFIG-01 |
-| **Description** | `config["wheel"]` must contain all 18+ required keys with the correct default values. |
+| **Description** | `config["wheel"]` must contain all 20 required keys with the correct default values. |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | REQ §7 config table; TSPEC §8.1 (18 keys, with `near_the_money_pct` and `options_lookforward_days` as TSPEC extensions); REQ-NFR-07 |
+| **Source** | REQ §7 config table; TSPEC §8.1 (20 keys total, including `near_the_money_pct` and `options_lookforward_days` as TSPEC extensions); REQ-NFR-07 |
 | **Test method** | Import `DEFAULT_CONFIG` from `default_config.py`. Assert all 20 keys exist in `DEFAULT_CONFIG["wheel"]`: `min_iv_rank`, `earnings_buffer_days`, `max_wheel_stock_price`, `near_the_money_pct`, `target_csp_delta_low`, `target_csp_delta_high`, `target_cc_delta_low`, `target_cc_delta_high`, `min_annualised_yield_pct`, `recommended_dte_low`, `recommended_dte_high`, `options_lookforward_days`, `take_profit_pct`, `dte_to_roll`, `iv_rank_lookback_days`, `min_chain_oi`, `max_chain_spread_pct`, `risk_free_rate_source`, `risk_free_rate_static`, `positions_dir`. |
 
 ---
@@ -1039,25 +1170,25 @@ The following table maps each upstream requirement to the PROPERTIES that cover 
 | Requirement | Properties |
 |---|---|
 | REQ-DATA-01 | PROP-DATA-01, PROP-DATA-02, PROP-DATA-15 |
-| REQ-DATA-02 | PROP-DATA-03, PROP-DATA-04, PROP-DATA-05, PROP-DATA-06, PROP-DATA-07, PROP-DATA-16 |
+| REQ-DATA-02 | PROP-DATA-03, PROP-DATA-04, PROP-DATA-05, PROP-DATA-06, PROP-DATA-07, PROP-DATA-16, PROP-DATA-17 |
 | REQ-DATA-03 | PROP-DATA-08, PROP-DATA-09, PROP-DATA-10, PROP-DATA-11, PROP-DATA-12, PROP-DATA-13 |
 | REQ-DATA-04 | PROP-DATA-14 |
 | REQ-DATA-05 | PROP-DATA-15 |
-| REQ-SCREEN-01 | PROP-SCREEN-01, PROP-SCREEN-05, PROP-SCREEN-07 |
-| REQ-SCREEN-02 | PROP-SCREEN-01, PROP-SCREEN-02, PROP-SCREEN-03, PROP-SCREEN-04, PROP-SCREEN-08 |
+| REQ-SCREEN-01 | PROP-SCREEN-01, PROP-SCREEN-05, PROP-SCREEN-06, PROP-SCREEN-07, PROP-SCREEN-08, PROP-SCREEN-09, PROP-SCREEN-10, PROP-SCREEN-11, PROP-SCREEN-13 |
+| REQ-SCREEN-02 | PROP-SCREEN-01, PROP-SCREEN-02, PROP-SCREEN-03, PROP-SCREEN-04, PROP-SCREEN-14 |
 | REQ-SCREEN-03 | *(CLI display — integration/E2E; not covered in this property set; see gap note §10)* |
-| REQ-TRADE-01 | PROP-TRADE-08, PROP-TRADE-11, PROP-TRADE-12 |
+| REQ-TRADE-01 | PROP-TRADE-08, PROP-TRADE-11, PROP-TRADE-12, PROP-TRADE-14 |
 | REQ-TRADE-02 | PROP-TRADE-01, PROP-TRADE-03, PROP-TRADE-05, PROP-TRADE-07, PROP-TRADE-10 |
 | REQ-TRADE-03 | PROP-TRADE-06, PROP-TRADE-09 |
 | REQ-TRADE-04 | PROP-TRADE-02, PROP-TRADE-04, PROP-TRADE-13 |
 | REQ-TRADE-05 | PROP-LIFE-07 |
-| REQ-LIFE-01 | PROP-ROUTE-01 through PROP-ROUTE-08, PROP-LIFE-01 |
+| REQ-LIFE-01 | PROP-ROUTE-01 through PROP-ROUTE-10, PROP-LIFE-01 |
 | REQ-LIFE-02 | PROP-LIFE-03, PROP-LIFE-04, PROP-LIFE-05, PROP-LIFE-11 |
 | REQ-LIFE-03 | PROP-LIFE-08, PROP-LIFE-09, PROP-LIFE-10 |
 | REQ-LIFE-04 | PROP-LIFE-06 |
 | REQ-LIFE-05 | PROP-LIFE-07 |
 | REQ-LIFE-06 | *(CLI display — E2E; see gap note §10)* |
-| REQ-NFR-01 | PROP-ROUTE-01, PROP-ROUTE-09, PROP-SCREEN-07 |
+| REQ-NFR-01 | PROP-ROUTE-01, PROP-ROUTE-09, PROP-SCREEN-13 |
 | REQ-NFR-03 | PROP-CONFIG-03 |
 | REQ-NFR-04 | PROP-FALLBACK-01 through PROP-FALLBACK-13 |
 | REQ-NFR-06 | PROP-DATA-01, PROP-FALLBACK-06, PROP-FALLBACK-09, PROP-FALLBACK-12 |
@@ -1066,12 +1197,15 @@ The following table maps each upstream requirement to the PROPERTIES that cover 
 | ADR-WHEEL-02 | PROP-ROUTE-07 |
 | ADR-WHEEL-03 | PROP-ROUTE-01, PROP-ROUTE-09 |
 | ADR-WHEEL-04 | PROP-FALLBACK-01 through PROP-FALLBACK-13 |
-| ADR-WHEEL-05 | PROP-LIFE-04, PROP-LIFE-05, PROP-LIFE-11 |
+| ADR-WHEEL-05 | PROP-LIFE-04, PROP-LIFE-05, PROP-LIFE-11, PROP-LIFE-12 |
 | TSPEC §8.1 | PROP-CONFIG-01, PROP-CONFIG-02 |
 | TSPEC §8.2 | PROP-CONFIG-03 |
+| TSPEC §9.1 | PROP-LIFE-12 |
 | TSPEC §9.3 (int-sort) | PROP-LIFE-04 |
 | TSPEC §9.4 (formula) | PROP-LIFE-03 |
 | TSPEC §10.2 (FSPEC-SE3-01) | PROP-FALLBACK-01 through PROP-FALLBACK-12 |
+| FSPEC-WHEEL-04 §9a, §9b | PROP-SCREEN-10, PROP-SCREEN-11 |
+| FSPEC-WHEEL-04 §9c | PROP-TRADE-14 |
 
 ---
 
@@ -1079,8 +1213,8 @@ The following table maps each upstream requirement to the PROPERTIES that cover 
 
 | Gap ID | Description | Disposition |
 |---|---|---|
-| GAP-01 | REQ-SCREEN-03 (CLI `WheelCandidateReport` display) has no Unit/Integration property defined. CLI output assertions require a Rich `Console(file=StringIO())` harness. | Add PROP-CLI-01 through PROP-CLI-03 in a follow-on revision once the CLI test harness is confirmed. |
+| GAP-01 | REQ-SCREEN-03 (CLI `WheelCandidateReport` display) has no Unit/Integration property defined. CLI output assertions require a Rich `Console(file=StringIO())` harness. The deferral is because the CLI code is not yet implemented. Once the CLI lands, properties can activate with `@pytest.mark.skip` guards removed. ADR-WHEEL-01 zero-variance disclosure propagation to `console.export_text()` output (PM-F-07) is also deferred here — the `iv_assessment` propagation at the integration layer (PROP-DATA-06, PROP-SCREEN-05) covers the functional chain; the final CLI assertion is a display concern deferred with GAP-01. | Add PROP-CLI-01 through PROP-CLI-03 when CLI is implemented. |
 | GAP-02 | REQ-LIFE-06 (`wheel-status` CLI sub-command) has no property defined. | Add PROP-CLI-04 through PROP-CLI-06 when CLI is implemented. |
 | GAP-03 | REQ-NFR-02 (p95 ≤ 10s latency for `get_options_chain`) requires a live network call. No Unit/Integration property is defined here — this is a performance benchmark, not an invariant. | Covered by a dedicated `@pytest.mark.integration` performance test in the test suite (not a PROPERTIES invariant). |
-| GAP-04 | `WheelPosition.prior_analyst_bias` read/write cycle (RollCheckAgent Rule 5 across runs) is not covered by a standalone integration property. | Rule 5 firing behaviour is partially covered by PROP-LIFE-08/09/10. A dedicated PROP-LIFE-12 for `prior_analyst_bias` persistence across two sequential `RollCheckAgent` invocations is recommended. |
-| GAP-05 | `cycle_pnl` formula (`(cc_strike - csp_strike + cumulative_premium_received) × shares_held`) is not separately verified — only `cycle_annualised_return_pct` (PROP-LIFE-03) uses it as an input. | Add PROP-LIFE-13 in a follow-on revision: verify `cycle_pnl` against the REQ-LIFE-02 AC3 numeric example (expected: 930). |
+| GAP-04 | `cycle_pnl` formula (`(cc_strike - csp_strike + cumulative_premium_received) × shares_held`) is not separately verified — only `cycle_annualised_return_pct` (PROP-LIFE-03) uses it as an input. REQ-LIFE-02 AC3 explicitly states the expected numeric value (`cycle_pnl = (145 − 140 + 4.30) × 100 = 930`). | Elevated to Medium priority. Add PROP-LIFE-13 in v0.3.0: verify `cycle_pnl` against REQ-LIFE-02 AC3 numeric example (expected: 930). |
+| GAP-05 | FSPEC-WHEEL-03 step 8d (price-based fallback for `recommended_strike_range` when Delta-anchored computation fails) has no property. The fallback formula is `[spot_price × (1 − target_csp_delta_high), spot_price × (1 − target_csp_delta_low)]`, rounded to nearest $0.50. | Add PROP-SCREEN-15 in v0.3.0. |
