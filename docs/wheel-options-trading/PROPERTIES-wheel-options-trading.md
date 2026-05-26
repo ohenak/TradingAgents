@@ -755,11 +755,11 @@ Properties are organised into seven domains:
 | Field | Value |
 |---|---|
 | **Property ID** | PROP-LIFE-10 |
-| **Description** | `RollCheckAgent` Rule 4 (earnings rule): when earnings is within remaining DTE and `abs(current_delta) == 0.10` (NOT deep OTM — exclusive lower bound), Rule 4 must fire. When `abs(current_delta) == 0.09` (deep OTM — below 0.10), Rule 4 must NOT fire. |
+| **Description** | `RollCheckAgent` Rule 4 (deep OTM rule): Rule 4 fires when `abs(current_delta) < 0.10` (strictly less than — exclusive upper bound). `abs(current_delta) == 0.10` must NOT fire Rule 4. `abs(current_delta) == 0.09` must fire Rule 4. This matches FSPEC-WHEEL-06: "Deep OTM is abs(delta) < 0.10, exclusive". |
 | **Type** | Unit |
 | **Level** | P0 (must-pass) |
-| **Source** | FSPEC-WHEEL-06 Rule 4 ("Deep OTM is abs(delta) < 0.10, exclusive"); FSPEC acceptance tests (FSPEC-TE2-02) |
-| **Test method** | Mock earnings within DTE. (a) `abs(current_delta) = 0.10`: assert Rule 4 fires. (b) `abs(current_delta) = 0.09`: assert Rule 4 does NOT fire. |
+| **Source** | FSPEC-WHEEL-06 Rule 4 ("Deep OTM is abs(delta) < 0.10, exclusive"); FSPEC acceptance tests (FSPEC-TE2-02); TE-F-02 (v2 review inversion correction) |
+| **Test method** | (a) `abs(current_delta) = 0.10`: assert Rule 4 does NOT fire (exclusive boundary). (b) `abs(current_delta) = 0.09`: assert Rule 4 fires (deep OTM). Both boundary cases must be tested. |
 
 ---
 

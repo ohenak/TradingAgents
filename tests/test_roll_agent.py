@@ -204,6 +204,27 @@ class TestEvaluateRules:
             "earnings_within_cycle=True must not suppress this"
         )
 
+    def test_rule4_fires_at_0_09_boundary(self):
+        """PROP-LIFE-10: abs_delta=0.09 fires Rule 4 (strictly less than 0.10 exclusive boundary).
+
+        FSPEC-WHEEL-06: "Deep OTM is abs(delta) < 0.10, exclusive."
+        abs_delta=0.09 is below 0.10 → Rule 4 must fire.
+        This tests the lower boundary one step below the threshold.
+        """
+        from tradingagents.agents.options.roll_agent import _evaluate_rules
+
+        rules = _evaluate_rules(
+            current_value_pct=80.0,
+            current_dte=30,
+            abs_delta=0.09,
+            earnings_within_cycle=False,
+            analyst_bias_changed=False,
+            wheel_phase="csp_open",
+        )
+        assert rules["rule4"] is True, (
+            "PROP-LIFE-10: abs_delta=0.09 must fire Rule 4 (0.09 < 0.10, exclusive boundary)"
+        )
+
     def test_rule5_analyst_update_fires(self):
         """Rule 5: analyst_bias_changed=True fires analyst_update."""
         from tradingagents.agents.options.roll_agent import _evaluate_rules
