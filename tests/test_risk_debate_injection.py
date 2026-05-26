@@ -218,3 +218,245 @@ class TestCcDecisionInjection:
         )
         result = _build_options_context(state, _position_loader=lambda t, d: None)
         assert "Earnings Clear" in result or "True" in result
+
+
+# ---------------------------------------------------------------------------
+# REQ-TRADE-05 AC1/AC2: options context injected into debate agent prompts
+# ---------------------------------------------------------------------------
+
+def _make_full_state(wheel_phase="csp_open", csp_json=None, cc_json=None, ticker="AAPL"):
+    """Build a minimal AgentState with risk_debate_state for debate agent tests."""
+    return {
+        "company_of_interest": ticker,
+        "trade_date": "2024-01-15",
+        "wheel_phase": wheel_phase,
+        "csp_decision": csp_json,
+        "cc_decision": cc_json,
+        "market_report": "Market report text.",
+        "sentiment_report": "Sentiment report text.",
+        "news_report": "News report text.",
+        "fundamentals_report": "Fundamentals report text.",
+        "trader_investment_plan": "Trader plan.",
+        "investment_plan": "Hold recommendation.",
+        "risk_debate_state": {
+            "history": "",
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "latest_speaker": "",
+            "current_aggressive_response": "",
+            "current_conservative_response": "",
+            "current_neutral_response": "",
+            "count": 0,
+        },
+        "past_context": "",
+    }
+
+
+class TestAggressiveDebatorOptionsContextInjection:
+    """REQ-TRADE-05 AC1: aggressive debator prompt contains options context when wheel_phase is set."""
+
+    def test_aggressive_prompt_contains_mid_premium_when_wheel_phase_set(self):
+        """REQ-TRADE-05 AC1: when wheel_phase is set and CspDecision present, prompt contains mid_premium."""
+        from tradingagents.agents.risk_mgmt.aggressive_debator import create_aggressive_debator
+
+        state = _make_full_state(
+            wheel_phase="csp_open",
+            csp_json=_make_csp_decision_json(tradeable=True),
+        )
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Aggressive argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_aggressive_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        prompt_text = captured_prompt[0]
+        assert "mid_premium" in prompt_text.lower() or "2.20" in prompt_text, (
+            "REQ-TRADE-05 AC1: aggressive debator prompt must contain mid_premium when wheel_phase is set"
+        )
+        assert "probability_of_profit" in prompt_text.lower() or "0.75" in prompt_text or "75.00%" in prompt_text, (
+            "REQ-TRADE-05 AC1: aggressive debator prompt must contain probability_of_profit when wheel_phase is set"
+        )
+
+    def test_aggressive_prompt_unchanged_when_wheel_phase_none(self):
+        """REQ-NFR-01: when wheel_phase is None, prompt must not contain Options Position Context block."""
+        from tradingagents.agents.risk_mgmt.aggressive_debator import create_aggressive_debator
+
+        state = _make_full_state(wheel_phase=None, csp_json=None)
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Aggressive argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_aggressive_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        assert "Options Position Context" not in captured_prompt[0], (
+            "REQ-NFR-01: equity-only path must not inject options context into debate prompt"
+        )
+
+
+class TestConservativeDebatorOptionsContextInjection:
+    """REQ-TRADE-05 AC1: conservative debator prompt contains options context when wheel_phase is set."""
+
+    def test_conservative_prompt_contains_mid_premium_when_wheel_phase_set(self):
+        """REQ-TRADE-05 AC1: when wheel_phase is set and CspDecision present, prompt contains mid_premium."""
+        from tradingagents.agents.risk_mgmt.conservative_debator import create_conservative_debator
+
+        state = _make_full_state(
+            wheel_phase="csp_open",
+            csp_json=_make_csp_decision_json(tradeable=True),
+        )
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Conservative argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_conservative_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        prompt_text = captured_prompt[0]
+        assert "mid_premium" in prompt_text.lower() or "2.20" in prompt_text, (
+            "REQ-TRADE-05 AC1: conservative debator prompt must contain mid_premium when wheel_phase is set"
+        )
+
+    def test_conservative_prompt_unchanged_when_wheel_phase_none(self):
+        """REQ-NFR-01: when wheel_phase is None, prompt must not contain Options Position Context block."""
+        from tradingagents.agents.risk_mgmt.conservative_debator import create_conservative_debator
+
+        state = _make_full_state(wheel_phase=None, csp_json=None)
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Conservative argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_conservative_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        assert "Options Position Context" not in captured_prompt[0], (
+            "REQ-NFR-01: equity-only path must not inject options context into debate prompt"
+        )
+
+
+class TestNeutralDebatorOptionsContextInjection:
+    """REQ-TRADE-05 AC1: neutral debator prompt contains options context when wheel_phase is set."""
+
+    def test_neutral_prompt_contains_mid_premium_when_wheel_phase_set(self):
+        """REQ-TRADE-05 AC1: when wheel_phase is set and CspDecision present, prompt contains mid_premium."""
+        from tradingagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
+
+        state = _make_full_state(
+            wheel_phase="csp_open",
+            csp_json=_make_csp_decision_json(tradeable=True),
+        )
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Neutral argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_neutral_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        prompt_text = captured_prompt[0]
+        assert "mid_premium" in prompt_text.lower() or "2.20" in prompt_text, (
+            "REQ-TRADE-05 AC1: neutral debator prompt must contain mid_premium when wheel_phase is set"
+        )
+
+    def test_neutral_prompt_unchanged_when_wheel_phase_none(self):
+        """REQ-NFR-01: when wheel_phase is None, prompt must not contain Options Position Context block."""
+        from tradingagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
+
+        state = _make_full_state(wheel_phase=None, csp_json=None)
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Neutral argument."
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_neutral_debator(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        assert "Options Position Context" not in captured_prompt[0], (
+            "REQ-NFR-01: equity-only path must not inject options context into debate prompt"
+        )
+
+
+class TestPortfolioManagerOptionsContextInjection:
+    """REQ-TRADE-05 AC2: portfolio manager prompt contains options context when wheel_phase is set."""
+
+    def test_pm_prompt_contains_mid_premium_when_wheel_phase_set(self):
+        """REQ-TRADE-05 AC2: when wheel_phase is set and CspDecision present, PM prompt contains mid_premium."""
+        from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
+
+        state = _make_full_state(
+            wheel_phase="csp_open",
+            csp_json=_make_csp_decision_json(tradeable=True),
+        )
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Final decision."
+        mock_structured = MagicMock()
+        mock_structured.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), MagicMock())[1]
+        mock_llm.with_structured_output.return_value = mock_structured
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_portfolio_manager(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        prompt_text = str(captured_prompt[0])
+        assert "mid_premium" in prompt_text.lower() or "2.20" in prompt_text, (
+            "REQ-TRADE-05 AC2: PM prompt must contain mid_premium when wheel_phase is set"
+        )
+
+    def test_pm_prompt_unchanged_when_wheel_phase_none(self):
+        """REQ-NFR-01: when wheel_phase is None, PM prompt must not contain Options Position Context block."""
+        from tradingagents.agents.managers.portfolio_manager import create_portfolio_manager
+
+        state = _make_full_state(wheel_phase=None, csp_json=None)
+
+        captured_prompt = []
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Final decision."
+        mock_structured = MagicMock()
+        mock_structured.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), MagicMock())[1]
+        mock_llm.with_structured_output.return_value = mock_structured
+        mock_llm.invoke.side_effect = lambda prompt: (captured_prompt.append(prompt), mock_response)[1]
+
+        node = create_portfolio_manager(mock_llm)
+        node(state)
+
+        assert captured_prompt, "LLM was not called"
+        assert all("Options Position Context" not in str(p) for p in captured_prompt), (
+            "REQ-NFR-01: equity-only path must not inject options context into PM prompt"
+        )
