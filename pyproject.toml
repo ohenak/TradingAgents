@@ -52,3 +52,22 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = ["docs/", ".claude/"]
+
+[tool.ruff.lint]
+# E/F: Pyflakes + pycodestyle errors only — no style enforcement on existing code
+select = ["E", "F"]
+ignore = [
+    "E501",   # line too long (handled by formatter separately)
+    "E402",   # module level import not at top (common in LangGraph agent files)
+    "F401",   # unused imports (many re-exported)
+    "F811",   # redefinition of unused name
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
