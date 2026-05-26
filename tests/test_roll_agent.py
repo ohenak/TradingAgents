@@ -245,21 +245,21 @@ class TestResolvePriority:
         assert reason == "breach_rule_roll"
 
     def test_rule5_beats_rule2(self):
-        """Rule5 > Rule2."""
+        """Rule5 > Rule2: analyst bias reversed → CLOSE (REQ-LIFE-03 AC4), not ROLL."""
         from tradingagents.agents.options.roll_agent import _resolve_priority
 
         rules = {"rule1": False, "rule2": True, "rule3": False, "rule4": False, "rule5": True}
         action, reason = _resolve_priority(rules)
-        assert action == "ROLL"
+        assert action == "CLOSE"
         assert reason == "analyst_update"
 
     def test_rule5_beats_rule1(self):
-        """Rule5 > Rule1."""
+        """Rule5 > Rule1: analyst bias reversed → CLOSE (REQ-LIFE-03 AC4), not ROLL."""
         from tradingagents.agents.options.roll_agent import _resolve_priority
 
         rules = {"rule1": True, "rule2": False, "rule3": False, "rule4": False, "rule5": True}
         action, reason = _resolve_priority(rules)
-        assert action == "ROLL"
+        assert action == "CLOSE"
         assert reason == "analyst_update"
 
     def test_rule2_beats_rule1(self):

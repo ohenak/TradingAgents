@@ -112,7 +112,7 @@ def _resolve_priority(rules: dict) -> tuple[str, str]:
     if rules.get("rule3") and not rules.get("rule3_roll") and not rules.get("rule3_close"):
         return ("ROLL", "breach_rule_roll")
     if rules.get("rule5"):
-        return ("ROLL", "analyst_update")
+        return ("CLOSE", "analyst_update")  # REQ-LIFE-03 AC4: bias reversal → CLOSE, not ROLL
     if rules.get("rule4"):
         return ("HOLD", "profit_capture")  # deep OTM: collect theta, return HOLD
     if rules.get("rule2"):
@@ -221,7 +221,7 @@ Rule 4 (Deep OTM): If abs(delta) < 0.10
    → trigger: profit_capture, action: HOLD (collect theta, very far OTM)
 
 Rule 5 (Analyst Update): If analyst bias changed from non-bearish to bearish
-   → trigger: analyst_update, action: ROLL
+   → trigger: analyst_update, action: CLOSE (exit position — REQ-LIFE-03 AC4)
 
 Priority when multiple rules fire: Rule3 > Rule5 > Rule4 > Rule2 > Rule1
 
