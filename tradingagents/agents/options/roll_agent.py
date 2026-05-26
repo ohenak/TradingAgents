@@ -30,9 +30,29 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.config import get_config
-from tradingagents.models.wheel_position import load_latest_open_position
+from tradingagents.models.wheel_position import load_latest_open_position, save_wheel_position
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_analyst_bias(investment_plan: str) -> str:
+    """Derive analyst bias from investment_plan text.
+
+    Returns 'bullish', 'bearish', or 'neutral'.
+    Keyword mapping:
+      bullish: buy, accumulate, overweight, strong buy, long
+      bearish: sell, underweight, reduce, avoid, short
+      neutral: hold, neutral, market perform, equal weight (or no keywords)
+    """
+    plan_lower = (investment_plan or "").lower()
+    bullish_kw = ("buy", "accumulate", "overweight", "strong buy", "long")
+    bearish_kw = ("sell", "underweight", "reduce", "avoid", "short")
+
+    if any(kw in plan_lower for kw in bearish_kw):
+        return "bearish"
+    if any(kw in plan_lower for kw in bullish_kw):
+        return "bullish"
+    return "neutral"
 
 
 def _evaluate_rules(
@@ -243,6 +263,15 @@ For ROLL: populate new_strike, new_expiration, new_dte, estimated_debit_or_credi
                 rationale=STRUCTURED_OUTPUT_SENTINEL,
             )
             raw = render_roll_decision(decision)
+
+        # Persist prior_analyst_bias to WheelPosition (TSPEC §5.4)
+        if position is not None:
+            new_bias = _derive_analyst_bias(investment_plan)
+            position.prior_analyst_bias = new_bias
+            try:
+                save_wheel_position(position, pos_dir)
+            except Exception as exc:
+                logger.warning("roll_check_agent: failed to persist prior_analyst_bias (%s)", exc)
 
         # Phase transitions based on RollDecision (DEC-PLAN-02)
         update: dict = {"roll_decision": raw}
