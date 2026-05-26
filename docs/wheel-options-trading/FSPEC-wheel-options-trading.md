@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.2.0 |
+| **Version** | 0.3.0 |
 | **Created** | 2026-05-25 |
 | **Upstream** | REQ-wheel-options-trading.md v0.2.0 → **FSPEC** |
 | **Downstream** | TSPEC, PROPERTIES |
-| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-FSPEC.md`, `CROSS-REVIEW-test-engineer-FSPEC.md` |
+| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-FSPEC.md`, `CROSS-REVIEW-test-engineer-FSPEC.md`, `CROSS-REVIEW-software-engineer-FSPEC-v2.md`, `CROSS-REVIEW-test-engineer-FSPEC-v2.md` |
 | **LEARNINGS** | `docs/wheel-options-trading/LEARNINGS-wheel-options-trading.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.3.0 | 2026-05-25 | Fix bind_structured call pattern, add wheel_cycle_summary node, enumerate AgentState fields, close remaining open questions |
 | 0.2.0 | 2026-05-25 | Address SE/TE FSPEC cross-review findings: fix route_to_vendor contract, add structured.py rule, resolve Rule 5 and Criterion 5 mechanisms, add FSPEC-WHEEL-08 and FSPEC-WHEEL-09, add boundary ACs, add test level annotations |
 | 0.1.0 | 2026-05-25 | Initial draft |
 
@@ -389,8 +390,9 @@ Output: `WheelCandidateReport` with the following fields:
 (Schema contract — rationale is always populated)
 
 **Open Questions:**
-- **Criterion 2 boundary — what counts as "near-the-money"?** The REQ specifies "near-the-money strikes" without giving a numeric range. This FSPEC uses ±10% of spot price as the definition. SE author must confirm or adjust this threshold.
-- **Criterion 3 target expiration calculation:** This FSPEC uses the midpoint DTE rounded up. SE author may prefer the lower bound (`recommended_dte_low`) as a more conservative anchor. Clarification needed.
+- None. Both items below are now closed.
+  - **Criterion 2 boundary — ±10% near-the-money:** Closed as confirmed. The near-the-money threshold is `near_the_money_pct: 0.10` (10% of spot price). This value is fixed in Phase 1 (not configurable); TSPEC author should add `near_the_money_pct` to Section 7 of the config table with default `0.10`.
+  - **Criterion 3 target expiration calculation:** Closed as confirmed. Use midpoint DTE rounded up — `ceil((recommended_dte_low + recommended_dte_high) / 2)` calendar days from `curr_date` — as specified in step 4.
 
 ---
 
@@ -432,7 +434,10 @@ Filters are applied in order A → B → C. A strike must pass all three to be p
 
 **Stage 4 — LLM selection:**
 10. Present the filtered (or relaxed) candidate strikes to the LLM along with: the analyst reports, the `WheelCandidateReport` rationale, and any relaxation notes from Stage 3.
-11. The LLM call producing `CspDecision` **MUST** be made via `bind_structured(llm, CspDecision)` from `agents/utils/structured.py`. The FSPEC does not prescribe the provider-specific mechanism — that is handled by `structured.py` transparently. If the structured call fails and the free-text fallback also fails to produce a parseable `CspDecision` instance (via JSON extraction), return `CspDecision` with `tradeable = False` and `rejection_reason = "Schema validation failed after fallback"`. No additional retry is performed at the agent level beyond `structured.py`'s internal fallback.
+11. The LLM call producing `CspDecision` uses the two-call pattern from `agents/utils/structured.py`:
+    - **Construction time:** `CspAgent` calls `bind_structured(llm, CspDecision, 'csp_agent')` to create a `structured_llm` wrapper. `agent_name` must be the snake_case identifier `'csp_agent'`.
+    - **Invocation time:** `CspAgent` calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'csp_agent')`. If the structured call succeeds, a validated `CspDecision` instance is returned. If it fails, `invoke_structured_or_freetext` returns a raw string. The agent must then attempt JSON extraction from the raw string using `try: CspDecision.model_validate_json(raw)`. If JSON extraction also fails, the agent returns a safe sentinel: `CspDecision` with `tradeable=False` and `rationale='Structured output failed — safe fallback applied.'`.
+    - No additional retry is performed at the agent level beyond the above two-step fallback.
 12. The LLM may not select a strike that was not in the presented list.
 
 **Stage 5 — Output assembly:**
@@ -454,7 +459,7 @@ Filters are applied in order A → B → C. A strike must pass all three to be p
 - Progressive relaxation drops filters in order C → B → A-fallback. Relaxation never widens the Delta range.
 - The earnings hard block in step 9d takes precedence over all other relaxation outcomes. If the only candidates straddle earnings, the result is always `tradeable = False`.
 - Before calling `get_options_chain`, the agent must verify that `options_lookforward_days >= recommended_dte_high`. If `options_lookforward_days` is set below `recommended_dte_high`, the system logs a warning and uses `max(options_lookforward_days, recommended_dte_high + 7)` as the effective lookforward window.
-- The LLM call must use `bind_structured(llm, CspDecision)` from `agents/utils/structured.py`. The agent does not implement its own retry logic beyond what `structured.py` provides.
+- **LLM call pattern:** At construction time, `CspAgent` calls `bind_structured(llm, CspDecision, 'csp_agent')` from `agents/utils/structured.py` to create a `structured_llm` wrapper. At invocation time, the agent calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'csp_agent')`. If the structured call succeeds, a validated `CspDecision` is returned. If it fails and `invoke_structured_or_freetext` returns a raw string, the agent attempts `CspDecision.model_validate_json(raw)`. If that also fails, the agent returns `CspDecision(tradeable=False, rationale='Structured output failed — safe fallback applied.')`. No additional retry beyond this two-step fallback.
 
 **Input / Output:**
 
@@ -481,7 +486,7 @@ Output: `CspDecision` with fields as specified in REQ-TRADE-02.
 - **All strikes filtered by Delta (Filter A):** Relaxation step 9c activates — nearest-Delta strike is presented to LLM with the nearest-available note.
 - **All suitable expirations overlap earnings:** Return `tradeable = False`, `rejection_reason = "All suitable expirations overlap earnings"`. LLM is not called. (Covers REQ-TRADE-01 AC3)
 - **`get_options_greeks` returns an error for a candidate strike:** That strike is silently excluded from the candidate list. If all strikes error, treat as no candidates found.
-- **`structured.py` fallback fails:** Return `tradeable = False`, `rejection_reason = "Schema validation failed after fallback"`.
+- **Structured output and JSON extraction both fail:** Return `CspDecision` with `tradeable = False` and `rationale = 'Structured output failed — safe fallback applied.'`.
 - **Phase 2 skipped (no `WheelCandidateReport`):** Use config defaults for DTE range and Delta range. This is the specified fallback path and is a valid production scenario.
 - **`options_lookforward_days` below `recommended_dte_high`:** Log warning and use `max(options_lookforward_days, recommended_dte_high + 7)` as effective lookforward.
 
@@ -522,6 +527,12 @@ Output: `CspDecision` with fields as specified in REQ-TRADE-02.
 *When:* Filter A runs
 *Then:* The strike is INCLUDED in the filtered set (boundary is inclusive).
 (Covers FSPEC step 6 inclusivity — FSPEC-TE-05 resolution)
+
+*Who:* System | *Test level:* Unit (mocked chain where delta boundary strike exactly matches `target_csp_delta_high`)
+*Given:* A strike with `abs(delta) == target_csp_delta_high` (exact upper boundary)
+*When:* Filter A runs
+*Then:* The strike is INCLUDED in the filtered set (upper boundary is inclusive).
+(Covers FSPEC step 6 upper-bound inclusivity — FSPEC-TE2-01 resolution)
 
 *Who:* System | *Test level:* Unit (mocked chain where `current_value_pct_of_premium == 50.0`)
 *Given:* `current_value_pct_of_premium == 50.0` (exact boundary)
@@ -597,7 +608,10 @@ Filters are applied in order A → B → C → D.
 
 **Stage 4 — LLM selection:**
 14. Present the filtered (or relaxed) candidates to the LLM with analyst reports, `WheelPosition` context, and any relaxation or warning notes.
-15. The LLM call producing `CcDecision` **MUST** be made via `bind_structured(llm, CcDecision)` from `agents/utils/structured.py`. The FSPEC does not prescribe the provider-specific mechanism — that is handled by `structured.py` transparently. If the structured call fails and the free-text fallback also fails to produce a parseable `CcDecision` instance (via JSON extraction), return `CcDecision` with `tradeable = False` and `rejection_reason = "Schema validation failed after fallback"`. No additional retry is performed at the agent level.
+15. The LLM call producing `CcDecision` uses the two-call pattern from `agents/utils/structured.py`:
+    - **Construction time:** `CcAgent` calls `bind_structured(llm, CcDecision, 'cc_agent')` to create a `structured_llm` wrapper. `agent_name` must be the snake_case identifier `'cc_agent'`.
+    - **Invocation time:** `CcAgent` calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'cc_agent')`. If the structured call succeeds, a validated `CcDecision` instance is returned. If it fails, `invoke_structured_or_freetext` returns a raw string. The agent must then attempt JSON extraction from the raw string using `try: CcDecision.model_validate_json(raw)`. If JSON extraction also fails, the agent returns a safe sentinel: `CcDecision` with `tradeable=False` and `rationale='Structured output failed — safe fallback applied.'`.
+    - No additional retry is performed at the agent level beyond the above two-step fallback.
 
 **Stage 5 — Output assembly:**
 16. Compute derived fields deterministically: `annualised_yield_on_cost_pct`, `upside_to_strike_pct`, `strike_above_cost_basis`.
@@ -617,7 +631,7 @@ Filters are applied in order A → B → C → D.
 - DTE and annualisation always use calendar days with 365-day year.
 - Relaxation drops filters in order D → C → fallback (no relaxation of Filters A or B).
 - `assigned_at` is the CSP strike from the prior `WheelPosition`. `cost_basis` is `assigned_at − csp_premium_received`. These are sourced from the `WheelPosition` record, not computed by the LLM.
-- The LLM call must use `bind_structured(llm, CcDecision)` from `agents/utils/structured.py`.
+- **LLM call pattern:** At construction time, `CcAgent` calls `bind_structured(llm, CcDecision, 'cc_agent')` from `agents/utils/structured.py` to create a `structured_llm` wrapper. At invocation time, the agent calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'cc_agent')`. If the structured call succeeds, a validated `CcDecision` is returned. If it fails and `invoke_structured_or_freetext` returns a raw string, the agent attempts `CcDecision.model_validate_json(raw)`. If that also fails, the agent returns `CcDecision(tradeable=False, rationale='Structured output failed — safe fallback applied.')`. No additional retry beyond this two-step fallback.
 
 **Input / Output:**
 
@@ -676,6 +690,18 @@ Output: `CcDecision` with fields as specified in REQ-TRADE-04.
 *When:* `rationale` field is read
 *Then:* It is a non-empty string.
 (Schema contract — rationale always populated)
+
+*Who:* System | *Test level:* Unit (mocked chain where call delta exactly matches `target_cc_delta_low`)
+*Given:* A call strike with `delta == target_cc_delta_low` (exact lower boundary)
+*When:* Filter B runs
+*Then:* The strike is INCLUDED in the filtered set (lower boundary is inclusive).
+(Covers FSPEC step 10 lower-bound inclusivity — FSPEC-TE2-01 resolution)
+
+*Who:* System | *Test level:* Unit (mocked chain where call delta exactly matches `target_cc_delta_high`)
+*Given:* A call strike with `delta == target_cc_delta_high` (exact upper boundary)
+*When:* Filter B runs
+*Then:* The strike is INCLUDED in the filtered set (upper boundary is inclusive).
+(Covers FSPEC step 10 upper-bound inclusivity — FSPEC-TE2-01 resolution)
 
 **Open Questions:**
 - **CC DTE defaults:** The REQ description mentions "21–45 DTE" for CC (vs "28–45 DTE" for CSP) but the config table only shows one shared `recommended_dte_low = 28`. SE author should confirm whether CC uses the same DTE bounds as CSP or a distinct set.
@@ -740,7 +766,10 @@ Priority order for `trigger_reason` (highest to lowest): **Rule 3 > Rule 5 > Rul
    - Target the next standard expiration at least `dte_to_roll` calendar days beyond the current expiration.
    - For a strike-selection-on-roll: target the same Delta range as the original trade type (CSP → `[target_csp_delta_low, target_csp_delta_high]`; CC → `[target_cc_delta_low, target_cc_delta_high]`).
    - Compute `estimated_debit_or_credit`: `new_mid_premium − current_contract_value` (positive = credit received, negative = debit paid).
-9. The LLM call producing `RollDecision` **MUST** be made via `bind_structured(llm, RollDecision)` from `agents/utils/structured.py`. The FSPEC does not prescribe the provider-specific mechanism — that is handled by `structured.py` transparently. If the structured call fails and the free-text fallback also fails, return `RollDecision` with `action = "HOLD"`, `trigger_reason = "profit_capture"`, and a `rationale` noting the schema failure.
+9. The LLM call producing `RollDecision` uses the two-call pattern from `agents/utils/structured.py`:
+    - **Construction time:** `RollCheckAgent` calls `bind_structured(llm, RollDecision, 'roll_check_agent')` to create a `structured_llm` wrapper. `agent_name` must be the snake_case identifier `'roll_check_agent'`.
+    - **Invocation time:** `RollCheckAgent` calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'roll_check_agent')`. If the structured call succeeds, a validated `RollDecision` instance is returned. If it fails, `invoke_structured_or_freetext` returns a raw string. The agent must then attempt JSON extraction from the raw string using `try: RollDecision.model_validate_json(raw)`. If JSON extraction also fails, the agent returns a safe sentinel: `RollDecision` with `action='HOLD'`, `trigger_reason='profit_capture'`, and `rationale='Structured output failed — safe fallback applied.'`.
+    - No additional retry is performed at the agent level beyond the above two-step fallback.
 10. Assemble and return `RollDecision` with all required fields.
 
 **Business Rules:**
@@ -755,7 +784,7 @@ Priority order for `trigger_reason` (highest to lowest): **Rule 3 > Rule 5 > Rul
 - `new_strike`, `new_expiration`, and `new_dte` are populated only when `action == "ROLL"`. They are `None` for `HOLD` and `CLOSE` actions.
 - `estimated_debit_or_credit` is populated only when `action == "ROLL"`. It is `None` for `HOLD` and `CLOSE`.
 - The `"profit_capture"` trigger_reason covers both "Rule 1 fired (profit target hit)" and "no rule fired (position within normal parameters)." This aliasing is intentional and documented here for downstream test assertion consistency.
-- The LLM call must use `bind_structured(llm, RollDecision)` from `agents/utils/structured.py`.
+- **LLM call pattern:** At construction time, `RollCheckAgent` calls `bind_structured(llm, RollDecision, 'roll_check_agent')` from `agents/utils/structured.py` to create a `structured_llm` wrapper. At invocation time, the agent calls `invoke_structured_or_freetext(structured_llm, plain_llm, prompt, render_fn, 'roll_check_agent')`. If the structured call succeeds, a validated `RollDecision` is returned. If it fails and `invoke_structured_or_freetext` returns a raw string, the agent attempts `RollDecision.model_validate_json(raw)`. If that also fails, the agent returns `RollDecision(action='HOLD', trigger_reason='profit_capture', rationale='Structured output failed — safe fallback applied.')`. No additional retry beyond this two-step fallback.
 
 **Input / Output:**
 
@@ -831,6 +860,23 @@ Output: `RollDecision` with fields:
 (Covers breach threshold inclusivity — FSPEC-TE-06 resolution)
 
 *Who:* System | *Test level:* Unit
+*Given:* `spot_price > csp_strike × 0.85` (i.e., `spot_price == csp_strike × 0.851` — breach threshold NOT met)
+*When:* Rule 3 is evaluated
+*Then:* Rule 3 does NOT fire. (Complementary negative boundary — FSPEC-TE2-02 resolution)
+
+*Who:* System | *Test level:* Unit
+*Given:* Earnings date falls within remaining DTE AND `abs(current_delta) == 0.10` (NOT deep OTM — exclusive boundary)
+*When:* Rule 4 is evaluated
+*Then:* Rule 4 fires with `trigger_reason == "earnings_rule"` (`abs(delta) == 0.10` is NOT deep OTM, so Rule 4 is not suppressed).
+(Covers Rule 4 deep-OTM boundary — FSPEC-TE2-02 resolution)
+
+*Who:* System | *Test level:* Unit
+*Given:* Earnings date falls within remaining DTE AND `abs(current_delta) == 0.09` (deep OTM — below 0.10 threshold)
+*When:* Rule 4 is evaluated
+*Then:* Rule 4 does NOT fire (position is considered safe through earnings at `abs(delta) < 0.10`).
+(Covers Rule 4 deep-OTM suppression boundary — FSPEC-TE2-02 resolution)
+
+*Who:* System | *Test level:* Unit
 *Given:* Rule 3 (breach) and Rule 1 (profit_capture) both fire simultaneously
 *When:* Final action is determined
 *Then:* `trigger_reason == "breach_rule_close"` or `"breach_rule_roll"` (Rule 3 takes priority over Rule 1).
@@ -867,6 +913,19 @@ Output: `RollDecision` with fields:
 - `setup_graph()` function (extended with `START → wheel_router` preamble edge)
 - `WheelPosition` model and position store
 - `WheelStateError` exception
+- `wheel_cycle_summary` node — emits the cycle summary report, persists the `WheelPosition` record as complete, writes the `TradingMemoryLog` entry, and outputs `wheel_phase: None` to signal pipeline end; routes to `END`
+
+**New AgentState Fields:**
+
+All new fields are `Optional[str]` (raw JSON strings) to preserve LangGraph's JSON-serialisation requirement. Agents write serialised JSON; readers deserialise on access.
+
+| Field name | Type | Written by | Read by | Notes |
+|---|---|---|---|---|
+| `wheel_phase` | `Optional[str]` | Propagator (init), `wheel_cycle_summary` (reset to `None`) | `route_wheel_phase()` | Lowercase string matching `WheelPhase(str, Enum)` values |
+| `wheel_candidate_report` | `Optional[str]` | `WheelAnalyst` node | CLI layer, `CspAgent` | Serialised JSON of `WheelCandidateReport` |
+| `csp_decision` | `Optional[str]` | `CspAgent` node | CLI layer, risk debate | Serialised JSON of `CspDecision` |
+| `cc_decision` | `Optional[str]` | `CcAgent` node | CLI layer, risk debate | Serialised JSON of `CcDecision` |
+| `roll_decision` | `Optional[str]` | `RollCheckAgent` node | CLI layer | Serialised JSON of `RollDecision` |
 
 **Phase Definitions:**
 
@@ -895,7 +954,7 @@ Output: `RollDecision` with fields:
 | `"cc_open"` | CC is called away (stock sold at `cc_strike`) | `"cycle_complete"` | `WheelPosition.call_away_date` set, `cycle_pnl` computed |
 | `"cc_open"` | `RollDecision.action == "ROLL"` | remains `"cc_open"` | `WheelPosition` updated with new CC details |
 | `"cc_open"` | `RollDecision.action == "CLOSE"` | `"stock_owned"` | CC closed; position reverts to stock-only state |
-| `"cycle_complete"` | Cycle summary emitted | `"screening"` | `cycle_number` incremented; new `WheelPosition` record created |
+| `"cycle_complete"` | Cycle summary emitted by `wheel_cycle_summary` node | `END` (via `wheel_cycle_summary`) | `wheel_phase` reset to `None` in output state; next invocation starts in equity-only mode until caller sets `wheel_phase = "screening"` |
 
 **Behavioural Flow — Router:**
 
@@ -916,9 +975,7 @@ Output: `RollDecision` with fields:
    - Validate: look up open `WheelPosition` for the ticker. If the position exists but `cc_strike` is `None`: raise `WheelStateError("No open CC position found for phase 'cc_open'")`. (Covers REQ-LIFE-01 AC5)
    - Return: `"roll_check_agent"` (node name for RollCheckAgent).
 9. **Branch — "cycle_complete":**
-   - Emit cycle summary (formatted `WheelPosition` report with `cycle_pnl` and `cycle_annualised_return_pct`).
-   - Append cycle summary to `TradingMemoryLog` (per REQ-LIFE-05).
-   - Return: `"signal_processor"` (or equivalent terminal node). The `wheel_phase = "screening"` reset is written to the output state of the `cycle_complete` node. The graph invocation terminates normally. The next `graph.invoke()` call starts in `"screening"`. No intra-invocation loop is added.
+   - Return: `"wheel_cycle_summary"` (the new terminal node for this phase). The `wheel_cycle_summary` node is responsible for: (a) emitting the cycle summary (formatted `WheelPosition` report with `cycle_pnl` and `cycle_annualised_return_pct`); (b) persisting the completed `WheelPosition` record; (c) writing the `TradingMemoryLog` entry (per REQ-LIFE-05); (d) outputting `wheel_phase: None` to the state to signal pipeline end. The graph invocation terminates normally after `wheel_cycle_summary` → `END`. The next `graph.invoke()` call starts fresh; `wheel_phase` being `None` causes the router to take the equity-only path until the caller sets `wheel_phase = "screening"` for the next cycle.
 
 **Phase Transition Guards:**
 
@@ -946,7 +1003,7 @@ Each transition has a required-data guard. If required data is missing, the tran
   - `wheel_phase == "csp_open"` → `"roll_check_agent"`
   - `wheel_phase == "stock_owned"` → `"cc_agent"`
   - `wheel_phase == "cc_open"` → `"roll_check_agent"`
-  - `wheel_phase == "cycle_complete"` → `"signal_processor"`
+  - `wheel_phase == "cycle_complete"` → `"wheel_cycle_summary"`
   - Unknown value → `plan.specs[0].agent_node` (equity-only fallback)
   - `ConditionalLogic` must be constructed with the first analyst node name injected at `setup_graph()` time so the router has a static value to return for the `None` and `"screening"` branches.
 
@@ -966,9 +1023,9 @@ Output from `route_wheel_phase()`:
 - **`wheel_phase = "cc_open"` with no `WheelPosition.cc_strike`:** Raises `WheelStateError`. (Covers REQ-LIFE-01 AC5)
 - **`wheel_phase = "invalid_phase"`:** Falls back to equity-only path; logs warning. (Covers REQ-LIFE-01 AC6)
 - **Phase transition with missing required data:** `WheelStateError` is raised with a descriptive message indicating which guard failed.
-- **`cycle_complete` emitted but memory log write fails:** Log the error; do not block the state reset. The cycle summary is still emitted to the user even if persistence fails.
+- **`cycle_complete` → `wheel_cycle_summary` but memory log write fails:** Log the error; do not block the state reset. The cycle summary is still emitted to the user even if persistence fails.
 - **Multiple tickers in parallel:** Each ticker has its own `WheelPosition` file. The router uses the ticker from the current state to look up the correct position.
-- **`cycle_complete` → `"screening"` reset:** The reset is written to the output state of the `cycle_complete` node. The graph terminates normally. The next invocation starts in `"screening"`. No loop-back edge is added.
+- **`cycle_complete` → `wheel_cycle_summary` → `END`:** The `wheel_phase: None` reset is written to the output state of the `wheel_cycle_summary` node. The graph terminates normally after `wheel_cycle_summary` → `END`. The next invocation starts in equity-only mode (`wheel_phase: None`) until the caller sets `wheel_phase = "screening"`. No loop-back edge is added.
 
 **Acceptance Tests:**
 
@@ -990,11 +1047,12 @@ Output from `route_wheel_phase()`:
 *Then:* CcAgent node is visited; CspAgent node is not visited.
 (Covers REQ-LIFE-01 AC3)
 
-*Who:* System | *Test level:* Unit
+*Who:* System | *Test level:* Integration
 *Given:* Phase transition occurs (CSP assigned — `assignment_date` is written to `WheelPosition`)
 *When:* State is updated
 *Then:* `wheel_phase` in `AgentState` changes from `"csp_open"` to `"stock_owned"`.
 (Covers REQ-LIFE-01 AC4)
+Note: Test level is Integration. Requires a `WheelPosition` fixture with `wheel_phase='csp_open'` and a mocked assignment trigger event. The exact trigger mechanism (e.g., stock price at or below CSP strike at expiry) is an SE-authored TSPEC decision; this AC verifies the state transition occurs when that trigger fires, not the trigger detection logic itself. (FSPEC-TE2-04 resolution)
 
 *Who:* System | *Test level:* Unit
 *Given:* `wheel_phase = "cc_open"` but no `WheelPosition` with `cc_strike` set exists for the ticker
@@ -1030,6 +1088,7 @@ Output from `route_wheel_phase()`:
 
 1. After the `WheelAnalyst` node completes and produces a `WheelCandidateReport`:
 2. `WheelCandidateReport` is serialised to a formatted display string (`report_text`) containing:
+   - Opening header line: `## WheelCandidateReport` (always the first line of `report_text`; this ensures the string `"WheelCandidateReport"` is present in `console.export_text()` output to satisfy REQ-SCREEN-03 AC1).
    - Approval status line: `"Approved: Yes"` / `"Approved: No"` with `rejection_reason` on the next line (when non-None).
    - IV Rank, IV Percentile, and IV Environment.
    - Earnings clearance status.
@@ -1045,6 +1104,7 @@ Output from `route_wheel_phase()`:
 
 **Business Rules:**
 - The `"Wheel Suitability"` section is rendered only when `"wheel"` is in `selected_analysts`. When `"wheel"` is not selected, no wheel-specific panel appears and existing CLI behaviour is unchanged.
+- The panel title is `"Wheel Suitability"`. The panel body always opens with the header line `## WheelCandidateReport`. This means both `"Wheel Suitability"` and `"WheelCandidateReport"` appear in `console.export_text()` output, satisfying both FSPEC-WHEEL-08 AC1 (asserts on `"Wheel Suitability"`) and REQ-SCREEN-03 AC1 (asserts on `"WheelCandidateReport"`).
 - `approved == True` renders the section header in default style.
 - `approved == False` renders the section header in Rich `"bold red"` style.
 - `rejection_reason` is always displayed in the panel body when non-None (even if other display elements are suppressed).
@@ -1058,8 +1118,8 @@ Input:
 - `selected_analysts: list[str]` (from graph config)
 
 Output:
-- Rich panel titled `"Wheel Suitability"` rendered to the CLI console.
-- `console.export_text()` contains: `"WheelCandidateReport"` string (or panel title), `"IV Rank"`, and `rejection_reason` when `approved == False`.
+- Rich panel titled `"Wheel Suitability"` rendered to the CLI console. The panel body always opens with the header line `## WheelCandidateReport`. Both strings therefore appear in `console.export_text()` output: `"Wheel Suitability"` (panel title) and `"WheelCandidateReport"` (body header).
+- `console.export_text()` contains: `"Wheel Suitability"`, `"WheelCandidateReport"` (body header), `"IV Rank"`, and `rejection_reason` when `approved == False`.
 
 **Edge Cases and Error Scenarios:**
 
@@ -1072,8 +1132,8 @@ Output:
 *Who:* User | *Test level:* Unit (mocked `WheelCandidateReport`, Rich `Console(file=StringIO())`)
 *Given:* Wheel Analyst is selected in CLI (i.e., `"wheel"` in `selected_analysts`) and analysis runs
 *When:* `console.export_text()` is called
-*Then:* Output contains `"Wheel Suitability"` (panel title) and `"IV Rank"`.
-(Covers REQ-SCREEN-03 AC1)
+*Then:* Output contains `"Wheel Suitability"` (panel title), `"WheelCandidateReport"` (body header), and `"IV Rank"`.
+(Covers REQ-SCREEN-03 AC1; both `"Wheel Suitability"` and `"WheelCandidateReport"` must be present — see Business Rules for the dual-string requirement)
 
 *Who:* User | *Test level:* Unit (mocked run with `"wheel"` absent from `selected_analysts`)
 *Given:* Wheel Analyst is not selected
@@ -1088,7 +1148,7 @@ Output:
 (Covers REQ-SCREEN-03 AC3)
 
 **Open Questions:**
-- **Panel title string:** This FSPEC uses `"Wheel Suitability"` as the panel title. SE author should confirm the exact title string and whether it should match `"WheelCandidateReport"` verbatim (per REQ-SCREEN-03 AC1 which checks for `"WheelCandidateReport"` in output). If the AC asserts on that exact string, the panel title or a subtitle must include it.
+- None. The panel title conflict is closed: the CLI panel title is `"Wheel Suitability"` AND the panel body always opens with the header line `## WheelCandidateReport`. Both strings therefore appear in `console.export_text()` output, satisfying REQ-SCREEN-03 AC1 (asserts on `"WheelCandidateReport"`) and FSPEC-WHEEL-08 AC1 (asserts on `"Wheel Suitability"`). (FSPEC-SE2-03 / FSPEC-TE2-05 resolved)
 
 ---
 
@@ -1130,6 +1190,7 @@ Output:
 - `options_context` must include `max_loss` and `breakeven_price` when the decision is a `CspDecision`.
 - `options_context` must include `upside_to_strike_pct` and `cost_basis` when the decision is a `CcDecision`.
 - The injected context is formatted as a structured text block (not raw JSON) for LLM readability. Field names and values are written as `"Field: value"` pairs, one per line.
+- **Injection point location:** The `{options_context}` block is injected into each debate agent's system prompt **after** the `{market_context}` variable block and **before** the debate role-assignment instruction. This placement ensures debaters receive the options trade specification as background context before their role framing is applied.
 - The existing risk debate prompt structure is not altered except for the addition of the `{options_context}` injection point. No existing debate prompt content is removed.
 - Prompt-content ACs assert on the assembled prompt string before it is sent to the LLM (deterministic assertion — does not depend on LLM output).
 
@@ -1169,5 +1230,6 @@ Output:
 (Covers REQ-TRADE-05 AC3)
 
 **Open Questions:**
-- **Injection point location in debate prompt:** This FSPEC specifies that `{options_context}` is injected at a "defined injection point" in the existing prompt template. SE author must specify where in the prompt structure this injection point is placed (e.g., after the standard market context block, before the debate instructions).
-- **`CspDecision`/`CcDecision` state field names:** This FSPEC references `csp_decision` and `cc_decision` as `AgentState` fields (serialised JSON strings). SE author must confirm these field names and their types (raw JSON string vs Pydantic instance) match the state layout defined in FSPEC-WHEEL-07.
+- None. Both items below are now closed.
+  - **Injection point location in debate prompt:** Closed. The `{options_context}` block is injected **after** the `{market_context}` variable block and **before** the debate role-assignment instruction. See Business Rules above. (FSPEC-SE2-05 resolved)
+  - **`CspDecision`/`CcDecision` state field names:** Closed. All new `AgentState` fields are enumerated in the "New AgentState Fields" table in FSPEC-WHEEL-07. The relevant fields are `csp_decision: Optional[str]` (serialised JSON, written by `CspAgent`) and `cc_decision: Optional[str]` (serialised JSON, written by `CcAgent`). All new fields use raw JSON strings (`Optional[str]`) for LangGraph serialisation compatibility. (FSPEC-SE2-04 resolved)
