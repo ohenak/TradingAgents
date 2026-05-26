@@ -71,18 +71,28 @@ def _evaluate_rules(
         Rule1: current_value_pct <= (100 - take_profit_pct) → profit_capture → HOLD
                (50% profit target; action=HOLD per REQ-LIFE-03 AC1)
         Rule2: current_dte <= dte_to_roll → dte_rule → ROLL
-        Rule3: abs_delta > 0.85 AND wheel_phase == "csp_open" → breach_rule_roll → ROLL
-               (CSP-only; deep ITM breach — assignment likely)
+        Rule3a: abs_delta > 0.85 AND wheel_phase == "csp_open"
+                AND current_value_pct >= 50 → breach_rule_roll → ROLL
+                (REQ-LIFE-03 AC3a: position retains value; roll to manage assignment risk)
+        Rule3b: abs_delta > 0.85 AND wheel_phase == "csp_open"
+                AND current_value_pct < 50 → breach_rule_close → CLOSE
+                (REQ-LIFE-03 AC3b: deep loss; close to cap further losses)
         Rule4: abs_delta < 0.10 → deep_OTM exclusive boundary → HOLD
                (deep OTM, very far from strike; keep collecting theta)
-        Rule5: analyst_bias changed to bearish → analyst_update → ROLL
+        Rule5: analyst_bias changed to bearish → analyst_update → CLOSE
 
     Priority: Rule3 > Rule5 > Rule4 > Rule2 > Rule1
+    (Rule3b takes absolute priority over Rule3a within Rule3 tier)
     """
     rules = {}
     rules["rule1"] = current_value_pct <= (100.0 - take_profit_pct)
     rules["rule2"] = current_dte <= dte_to_roll
-    rules["rule3"] = abs_delta > 0.85 and wheel_phase == WheelPhase.CSP_OPEN.value
+    # Rule3 is CSP-only: split by current_value_pct to distinguish ROLL vs CLOSE
+    csp_breach = abs_delta > 0.85 and wheel_phase == WheelPhase.CSP_OPEN.value
+    rules["rule3_roll"] = csp_breach and current_value_pct >= 50.0
+    rules["rule3_close"] = csp_breach and current_value_pct < 50.0
+    # Backward-compat alias: rule3 is True if either sub-rule fires
+    rules["rule3"] = csp_breach
     rules["rule4"] = abs_delta < 0.10
     rules["rule5"] = analyst_bias_changed
     return rules
@@ -92,8 +102,14 @@ def _resolve_priority(rules: dict) -> tuple[str, str]:
     """Resolve rule priority to (action, trigger_reason).
 
     Priority: Rule3 > Rule5 > Rule4 > Rule2 > Rule1
+    Within Rule3: breach_rule_close (AC3b, deep loss) supersedes breach_rule_roll (AC3a).
     """
-    if rules.get("rule3"):
+    if rules.get("rule3_close"):
+        return ("CLOSE", "breach_rule_close")
+    if rules.get("rule3_roll"):
+        return ("ROLL", "breach_rule_roll")
+    # Backward-compat: if rule3 fires without sub-keys (legacy callers), emit roll
+    if rules.get("rule3") and not rules.get("rule3_roll") and not rules.get("rule3_close"):
         return ("ROLL", "breach_rule_roll")
     if rules.get("rule5"):
         return ("ROLL", "analyst_update")

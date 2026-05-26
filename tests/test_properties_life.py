@@ -318,18 +318,37 @@ class TestBuildOptionsContextNoPastCycles:
 class TestPriorAnalystBiasPersistence:
     """PROP-LIFE-12: RollCheckAgent persists prior_analyst_bias to WheelPosition.
 
-    NOTE: The current roll_agent.py implementation does NOT write prior_analyst_bias
-    back to the WheelPosition file. This test covers the PROPERTIES requirement that
-    it SHOULD be persisted. If this test fails, the implementation needs to be extended.
+    Two sequential runs verify the field is overwritten on each run — not just
+    written once. This guards against write-once bugs (TE-F-02).
 
     Per TSPEC §5.4: "Write: ... Also writes updated WheelPosition JSON to disk
     (updating prior_analyst_bias)."
     """
 
+    def _make_mock_llm(self, decision) -> MagicMock:
+        """Build a mock LLM that returns the given RollDecision."""
+        mock_llm = MagicMock()
+        mock_structured = MagicMock()
+        mock_structured.invoke.return_value = decision
+        mock_llm.with_structured_output.return_value = mock_structured
+        return mock_llm
+
+    def _make_hold_decision(self) -> "RollDecision":
+        from tradingagents.agents.schemas import RollDecision
+        return RollDecision(
+            action="HOLD",
+            ticker="AAPL",
+            current_strike=145.0,
+            current_expiration="2024-02-16",
+            current_dte=25,
+            current_value_pct_of_premium=45.0,
+            trigger_reason="profit_capture",
+            rationale="Profit target hit.",
+        )
+
     def test_prior_analyst_bias_persisted_after_agent_run(self, tmp_path):
         """PROP-LIFE-12: after RollCheckAgent runs, WheelPosition.prior_analyst_bias is updated."""
         from tradingagents.agents.options.roll_agent import create_roll_check_agent
-        from tradingagents.agents.schemas import RollDecision, render_roll_decision
 
         # Create position with no prior_analyst_bias
         pos = WheelPosition(
@@ -342,25 +361,11 @@ class TestPriorAnalystBiasPersistence:
         )
         save_wheel_position(pos, str(tmp_path))
 
-        # RollDecision with HOLD action (no phase transition)
-        decision = RollDecision(
-            action="HOLD",
-            ticker="AAPL",
-            current_strike=145.0,
-            current_expiration="2024-02-16",
-            current_dte=25,
-            current_value_pct_of_premium=45.0,
-            trigger_reason="profit_capture",
-            rationale="Profit target hit.",
-        )
+        decision = self._make_hold_decision()
+        mock_llm = self._make_mock_llm(decision)
 
-        mock_llm = MagicMock()
-        mock_structured = MagicMock()
-        mock_structured.invoke.return_value = decision
-        mock_llm.with_structured_output.return_value = mock_structured
-
-        # investment_plan with "Buy" recommendation → bias = "bullish"
-        state = {
+        # Run 1: investment_plan with "Buy" → bias = "bullish"
+        state_bullish = {
             "company_of_interest": "AAPL",
             "trade_date": "2024-01-15",
             "wheel_phase": "csp_open",
@@ -372,23 +377,61 @@ class TestPriorAnalystBiasPersistence:
             str(tmp_path),
             _position_loader=lambda t, d: load_latest_open_position(t, d),
         )
-        agent_fn(state, {})
+        agent_fn(state_bullish, {})
 
-        # If the implementation persists prior_analyst_bias, verify it.
-        # This test is RED if the implementation doesn't write back the bias.
-        # It validates TSPEC §5.4 requirement.
         updated = load_latest_open_position("AAPL", str(tmp_path))
-        if updated is not None:
-            # The agent should have written prior_analyst_bias = "bullish"
-            # (derived from "Buy recommendation" → "bullish")
-            # This assertion guards the persistence requirement.
-            # If None, the implementation needs to add this write step.
-            assert updated.prior_analyst_bias is not None, (
-                "PROP-LIFE-12: prior_analyst_bias must be persisted to WheelPosition "
-                "after RollCheckAgent run. Per TSPEC §5.4, the agent must write "
-                "updated WheelPosition to disk (updating prior_analyst_bias)."
-            )
-            assert updated.prior_analyst_bias in ("bullish", "neutral", "bearish"), (
-                f"PROP-LIFE-12: prior_analyst_bias must be one of "
-                f"'bullish'/'neutral'/'bearish', got: {updated.prior_analyst_bias}"
-            )
+        assert updated is not None, "PROP-LIFE-12: position must exist after first run"
+        assert updated.prior_analyst_bias is not None, (
+            "PROP-LIFE-12: prior_analyst_bias must be persisted to WheelPosition "
+            "after RollCheckAgent run. Per TSPEC §5.4, the agent must write "
+            "updated WheelPosition to disk (updating prior_analyst_bias)."
+        )
+        assert updated.prior_analyst_bias == "bullish", (
+            f"PROP-LIFE-12 run 1: expected prior_analyst_bias='bullish' (from 'Buy'), "
+            f"got: {updated.prior_analyst_bias}"
+        )
+
+    def test_prior_analyst_bias_overwritten_on_second_run(self, tmp_path):
+        """PROP-LIFE-12: second run with bearish plan overwrites 'bullish' → 'bearish'.
+
+        Guards against write-once bugs where the first write is not updated
+        on subsequent calls (TE-F-02 second-run requirement).
+        """
+        from tradingagents.agents.options.roll_agent import create_roll_check_agent
+
+        # Create position with prior_analyst_bias already set to "bullish"
+        pos = WheelPosition(
+            ticker="AAPL",
+            wheel_phase="csp_open",
+            cycle_number=1,
+            csp_strike=145.0,
+            csp_expiration="2024-02-16",
+            prior_analyst_bias="bullish",
+        )
+        save_wheel_position(pos, str(tmp_path))
+
+        decision = self._make_hold_decision()
+        mock_llm = self._make_mock_llm(decision)
+
+        # Run 2: investment_plan with "Sell" → bias = "bearish"
+        state_bearish = {
+            "company_of_interest": "AAPL",
+            "trade_date": "2024-01-22",
+            "wheel_phase": "csp_open",
+            "investment_plan": "Sell — fundamentals have deteriorated significantly.",
+        }
+
+        agent_fn = create_roll_check_agent(
+            mock_llm,
+            str(tmp_path),
+            _position_loader=lambda t, d: load_latest_open_position(t, d),
+        )
+        agent_fn(state_bearish, {})
+
+        updated = load_latest_open_position("AAPL", str(tmp_path))
+        assert updated is not None, "PROP-LIFE-12: position must exist after second run"
+        assert updated.prior_analyst_bias == "bearish", (
+            f"PROP-LIFE-12 run 2: expected prior_analyst_bias='bearish' (from 'Sell'), "
+            f"got: {updated.prior_analyst_bias}. "
+            f"This guards against write-once bugs."
+        )

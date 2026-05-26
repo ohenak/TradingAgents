@@ -69,8 +69,8 @@ class TestWheelConfigAllKeysPresent:
 class TestWheelConfigDefaultValues:
     """PROP-CONFIG-02: near_the_money_pct and options_lookforward_days defaults."""
 
-    def test_near_the_money_pct_default_is_present(self):
-        """PROP-CONFIG-02: near_the_money_pct key exists with a float default."""
+    def test_near_the_money_pct_exact_default(self):
+        """PROP-CONFIG-02: near_the_money_pct exact REQ v0.3.0 §7 default is 0.05."""
         from tradingagents.default_config import DEFAULT_CONFIG
         wheel = DEFAULT_CONFIG["wheel"]
         assert "near_the_money_pct" in wheel, (
@@ -79,6 +79,10 @@ class TestWheelConfigDefaultValues:
         assert isinstance(wheel["near_the_money_pct"], float), (
             f"PROP-CONFIG-02: near_the_money_pct must be a float, "
             f"got {type(wheel['near_the_money_pct'])}"
+        )
+        assert wheel["near_the_money_pct"] == 0.05, (
+            f"PROP-CONFIG-02: near_the_money_pct must be 0.05 (REQ v0.3.0 §7), "
+            f"got {wheel['near_the_money_pct']}"
         )
 
     def test_near_the_money_pct_is_valid_range(self):
@@ -89,8 +93,8 @@ class TestWheelConfigDefaultValues:
             f"PROP-CONFIG-02: near_the_money_pct must be in (0, 1) as a fraction, got {val}"
         )
 
-    def test_options_lookforward_days_default_is_present(self):
-        """PROP-CONFIG-02: options_lookforward_days key exists with an int default."""
+    def test_options_lookforward_days_exact_default(self):
+        """PROP-CONFIG-02: options_lookforward_days exact REQ v0.3.0 §7 default is 45."""
         from tradingagents.default_config import DEFAULT_CONFIG
         wheel = DEFAULT_CONFIG["wheel"]
         assert "options_lookforward_days" in wheel, (
@@ -99,6 +103,10 @@ class TestWheelConfigDefaultValues:
         assert isinstance(wheel["options_lookforward_days"], int), (
             f"PROP-CONFIG-02: options_lookforward_days must be an int, "
             f"got {type(wheel['options_lookforward_days'])}"
+        )
+        assert wheel["options_lookforward_days"] == 45, (
+            f"PROP-CONFIG-02: options_lookforward_days must be 45 (REQ v0.3.0 §7), "
+            f"got {wheel['options_lookforward_days']}"
         )
 
     def test_options_lookforward_days_gte_recommended_dte_high(self):

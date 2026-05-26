@@ -71,9 +71,9 @@ class TestWheelConfigKeys:
         assert DEFAULT_CONFIG["wheel"]["recommended_dte_low"] == 28
 
     def test_options_lookforward_days_default(self):
-        """options_lookforward_days defaults to 90."""
+        """options_lookforward_days defaults to 45 (REQ v0.3.0 §7 authoritative default)."""
         from tradingagents.default_config import DEFAULT_CONFIG
-        assert DEFAULT_CONFIG["wheel"]["options_lookforward_days"] == 90
+        assert DEFAULT_CONFIG["wheel"]["options_lookforward_days"] == 45
 
     def test_positions_dir_is_string(self):
         """positions_dir is a non-empty string."""

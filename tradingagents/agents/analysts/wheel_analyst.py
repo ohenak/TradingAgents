@@ -64,7 +64,7 @@ def create_wheel_analyst(llm: Any) -> Callable[[AgentState, RunnableConfig], dic
         max_wheel_stock_price = wheel_cfg.get("max_wheel_stock_price", 500.0)
         min_chain_oi = wheel_cfg.get("min_chain_oi", 100)
         max_chain_spread_pct = wheel_cfg.get("max_chain_spread_pct", 10.0)
-        near_the_money_pct = wheel_cfg.get("near_the_money_pct", 0.10)
+        near_the_money_pct = wheel_cfg.get("near_the_money_pct", 0.05)
         dte_low = wheel_cfg.get("recommended_dte_low", 28)
         dte_high = wheel_cfg.get("recommended_dte_high", 45)
         target_csp_delta_low = wheel_cfg.get("target_csp_delta_low", 0.20)

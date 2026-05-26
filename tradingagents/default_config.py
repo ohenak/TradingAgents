@@ -168,16 +168,15 @@ DEFAULT_CONFIG = _apply_nested_env_overrides(_apply_env_overrides({
     # All 18 keys have inline comments per REQ-NFR-07.
     # Note: recommended_dte_low = 28 is authoritative (DEC-PLAN-01);
     # REQ-TRADE-03 text "21–45 DTE" was corrected to "28–45" in REQ v0.3.0.
-    # near_the_money_pct and options_lookforward_days are TSPEC extensions
-    # (PM-TSPEC-02); REQ v0.3.0 adds them to Section 7 config table.
+    # All defaults below match REQ v0.3.0 §7 config table (authoritative).
     # -----------------------------------------------------------------------
     "wheel": {
         # Screening thresholds
         "min_iv_rank": 25,                    # int: minimum IV Rank to approve a wheel candidate
         "earnings_buffer_days": 14,           # int: min days between target expiry and next earnings
         "max_wheel_stock_price": 500.0,       # float: maximum stock price for cash manageability
-        "near_the_money_pct": 0.10,           # float: ±% of spot price defining near-the-money strikes (Criterion 2)
-                                              # NOTE: not in REQ Section 7 — TSPEC addition per FSPEC-WHEEL-03 closure (PM-TSPEC-02)
+        "near_the_money_pct": 0.05,           # float: ±% of spot price defining near-the-money strikes (Criterion 2)
+                                              # REQ v0.3.0 §7 default: 0.05
 
         # CSP parameters
         "target_csp_delta_low": 0.20,         # float: lower bound of target put delta (inclusive)
@@ -191,8 +190,8 @@ DEFAULT_CONFIG = _apply_nested_env_overrides(_apply_env_overrides({
         "min_annualised_yield_pct": 12.0,     # float: minimum annualised premium yield to accept a trade
         "recommended_dte_low": 28,            # int: minimum DTE (calendar days) for new positions
         "recommended_dte_high": 45,           # int: maximum DTE (calendar days) for new positions
-        "options_lookforward_days": 90,       # int: chain look-ahead window (calendar days); must be >= recommended_dte_high
-                                              # NOTE: not in REQ Section 7 — TSPEC addition per FSPEC-WHEEL-04 closure (PM-TSPEC-02)
+        "options_lookforward_days": 45,       # int: chain look-ahead window (calendar days); must be >= recommended_dte_high
+                                              # REQ v0.3.0 §7 default: 45
 
         # Roll management
         "take_profit_pct": 50.0,              # float: roll/close when contract value is at or below this % of premium received

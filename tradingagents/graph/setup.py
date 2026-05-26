@@ -92,7 +92,7 @@ class GraphSetup:
         try:
             cfg = get_config()
             wheel_cfg = cfg.get("wheel", {})
-            options_lookforward = wheel_cfg.get("options_lookforward_days", 90)
+            options_lookforward = wheel_cfg.get("options_lookforward_days", 45)
             dte_high = wheel_cfg.get("recommended_dte_high", 45)
             if options_lookforward < dte_high:
                 warnings.warn(
@@ -216,6 +216,20 @@ class GraphSetup:
             },
         )
 
-        workflow.add_edge("Portfolio Manager", END)
+        if wheel_selected:
+            # In screening mode, Portfolio Manager routes to csp_agent so CspAgent
+            # can generate the CSP recommendation (REQ-LIFE-01 AC2, REQ-TRADE-01 AC1).
+            # In all other wheel phases and equity-only mode, Portfolio Manager routes to END.
+            workflow.add_conditional_edges(
+                "Portfolio Manager",
+                self.conditional_logic.route_after_portfolio_manager,
+                {
+                    "csp_agent": "csp_agent",
+                    "__end__": END,
+                },
+            )
+            workflow.add_edge("csp_agent", END)
+        else:
+            workflow.add_edge("Portfolio Manager", END)
 
         return workflow

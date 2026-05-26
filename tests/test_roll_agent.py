@@ -164,6 +164,46 @@ class TestEvaluateRules:
         )
         assert rules["rule4"] is False
 
+    def test_rule4_boundary_exclusive_at_0_10_with_earnings_within_cycle(self):
+        """PROP-LIFE-10: abs_delta == 0.10 does NOT fire Rule 4, even with earnings_within_cycle=True.
+
+        Guards against write-once / vacuous tests — the boundary must be exclusive at 0.10
+        regardless of whether earnings are within the cycle (TE-F-04).
+        """
+        from tradingagents.agents.options.roll_agent import _evaluate_rules
+
+        rules = _evaluate_rules(
+            current_value_pct=80.0,
+            current_dte=30,
+            abs_delta=0.10,
+            earnings_within_cycle=True,  # earnings ARE within cycle
+            analyst_bias_changed=False,
+            wheel_phase="csp_open",
+        )
+        # Rule 4 (deep OTM: abs_delta < 0.10) must still be False at the boundary
+        assert rules["rule4"] is False, (
+            "PROP-LIFE-10: abs_delta=0.10 must NOT fire Rule 4 (exclusive boundary); "
+            "earnings_within_cycle=True must not change this"
+        )
+
+    def test_rule4_fires_with_deep_otm_and_earnings_within_cycle(self):
+        """PROP-LIFE-10: abs_delta=0.05 fires Rule 4 (deep OTM) even with earnings_within_cycle=True."""
+        from tradingagents.agents.options.roll_agent import _evaluate_rules
+
+        rules = _evaluate_rules(
+            current_value_pct=80.0,
+            current_dte=30,
+            abs_delta=0.05,
+            earnings_within_cycle=True,  # earnings ARE within cycle
+            analyst_bias_changed=False,
+            wheel_phase="csp_open",
+        )
+        # Rule 4 (deep OTM: abs_delta < 0.10) must fire
+        assert rules["rule4"] is True, (
+            "PROP-LIFE-10: abs_delta=0.05 must fire Rule 4 (deep OTM); "
+            "earnings_within_cycle=True must not suppress this"
+        )
+
     def test_rule5_analyst_update_fires(self):
         """Rule 5: analyst_bias_changed=True fires analyst_update."""
         from tradingagents.agents.options.roll_agent import _evaluate_rules

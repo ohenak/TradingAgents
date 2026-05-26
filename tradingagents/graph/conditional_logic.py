@@ -102,6 +102,20 @@ class ConditionalLogic:
         # Surface to CLI user per ADR-WHEEL-02 (stored in state for CLI retrieval)
         return self.first_analyst_node
 
+    def route_after_portfolio_manager(self, state: AgentState) -> str:
+        """Route after Portfolio Manager.
+
+        When wheel is selected and wheel_phase is "screening", the graph
+        routes to csp_agent so CspAgent can generate the CSP recommendation
+        (REQ-LIFE-01 AC2, REQ-TRADE-01 AC1).
+
+        All other paths (equity-only, non-screening wheel phases) route to END.
+        """
+        wheel_phase = state.get("wheel_phase")
+        if wheel_phase == "screening":
+            return "csp_agent"
+        return "__end__"
+
     def should_continue_market(self, state: AgentState):
         """Determine if market analysis should continue."""
         messages = state["messages"]

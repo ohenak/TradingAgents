@@ -48,7 +48,7 @@ def get_options_chain(
     try:
         target_dt = datetime.strptime(target_date, "%Y-%m-%d")
         options_lookforward_days = (config or {}).get("wheel", {}).get(
-            "options_lookforward_days", 90
+            "options_lookforward_days", 45
         )
         cutoff = target_dt + timedelta(days=options_lookforward_days)
 

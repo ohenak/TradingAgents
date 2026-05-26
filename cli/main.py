@@ -1287,21 +1287,60 @@ def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
     """Render a WheelCandidateReport as a Rich panel.
 
     Style: bold red when approved=False, default when approved=True.
-    Surfaces ADR-WHEEL-01 zero-variance flat-range note in iv_assessment.
+    Surfaces ADR-WHEEL-01 zero-variance flat-range note in iv_assessment
+    deterministically from the schema field — not relying on LLM faithfulness
+    (REQ-DATA-02 AC5, REQ-SCREEN-02, PM-F-05).
     """
     from tradingagents.agents.schemas import WheelCandidateReport
 
     approved = None
+    panel_content = f"## WheelCandidateReport\n\n{report_raw}"
+
     try:
         report = WheelCandidateReport.model_validate_json(report_raw)
         approved = report.approved
+
+        # Build a structured display from schema fields (deterministic — not dependent on LLM)
+        # TSPEC §7.1 template
+        approval_line = "Approved: Yes" if report.approved else f"Approved: No"
+        rejection_line = (
+            f"\nRejection Reason: {report.rejection_reason}"
+            if report.rejection_reason
+            else ""
+        )
+        iv_note = ""
+        if report.iv_assessment and "IV range is flat" in report.iv_assessment:
+            iv_note = f"\n**Note:** {report.iv_assessment}"
+
+        strike_range = (
+            f"[{report.recommended_strike_range[0]:.2f}, {report.recommended_strike_range[1]:.2f}]"
+            if len(report.recommended_strike_range) == 2
+            else "N/A"
+        )
+        dte_range = (
+            f"[{report.recommended_dte_range[0]}, {report.recommended_dte_range[1]}] calendar days"
+            if len(report.recommended_dte_range) == 2
+            else "N/A"
+        )
+        rationale_text = report.rationale[:300] + ("..." if len(report.rationale) > 300 else "")
+
+        panel_content = (
+            f"## WheelCandidateReport\n\n"
+            f"{approval_line}{rejection_line}\n"
+            f"IV Rank: {report.iv_rank:.1f}\n"
+            f"IV Percentile: {report.iv_percentile:.1f}\n"
+            f"IV Environment: {report.iv_environment}\n"
+            f"IV Assessment: {report.iv_assessment}{iv_note}\n"
+            f"Earnings Clearance: {'OK' if report.earnings_clearance_ok else 'FAIL'}\n"
+            f"Recommended Strike Range: {strike_range}\n"
+            f"Recommended DTE Range: {dte_range}\n"
+            f"Rationale: {rationale_text}"
+        )
     except Exception:
-        pass
+        # Fall back to raw display if schema parsing fails
+        panel_content = f"## WheelCandidateReport\n\n{report_raw}"
 
     border_style = "bold red" if approved is False else "green"
-
-    # TSPEC §7.1 template
-    panel_content = f"## WheelCandidateReport\n\n{report_raw}"
 
     console_obj.print(
         Panel(
@@ -1400,9 +1439,8 @@ def wheel_status(
             # Compute DTE
             if expiry:
                 try:
-                    from datetime import date as date_cls
-                    exp_dt = datetime.strptime(expiry, "%Y-%m-%d").date()
-                    dte_val = (exp_dt - datetime.now().date()).days
+                    exp_dt = datetime.datetime.strptime(expiry, "%Y-%m-%d").date()
+                    dte_val = (exp_dt - datetime.datetime.now().date()).days
                     dte_str = str(dte_val)
                 except Exception:
                     pass
@@ -1453,8 +1491,8 @@ def wheel_status(
             duration = ""
             if pos.csp_open_date and pos.call_away_date:
                 try:
-                    open_dt = datetime.strptime(pos.csp_open_date, "%Y-%m-%d")
-                    close_dt = datetime.strptime(pos.call_away_date, "%Y-%m-%d")
+                    open_dt = datetime.datetime.strptime(pos.csp_open_date, "%Y-%m-%d")
+                    close_dt = datetime.datetime.strptime(pos.call_away_date, "%Y-%m-%d")
                     duration = str((close_dt - open_dt).days)
                 except Exception:
                     pass
