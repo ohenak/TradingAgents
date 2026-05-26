@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | SE-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-25 |
 | **Upstream** | TSPEC-wheel-options-trading.md v0.2.0 → **DECISIONS** |
 | **Downstream** | PLAN, future CONSOLIDATE-LEARNINGS |
-| **Cross-Reviews** | _(none yet)_ |
+| **Cross-Reviews** | CROSS-REVIEW-product-manager-DECISIONS.md, CROSS-REVIEW-test-engineer-DECISIONS.md |
 | **LEARNINGS** | `docs/wheel-options-trading/LEARNINGS-wheel-options-trading.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.2.0 | 2026-05-25 | Address PM/TE cross-review: accuracy labelling, product justifications, single-ticker constraint, sentinel distinguishability, orphan file risk, test coverage notes |
 | 0.1.0 | 2026-05-25 | Initial draft — five ADRs extracted from REQ, FSPEC, TSPEC, and cross-review trail |
 
 ---
@@ -60,10 +61,11 @@ The `iv_series: Optional[list[float]]` injectable parameter is added to the raw 
 - The `iv_environment` enum provides a structured, testable proxy usable by downstream agents (WheelAnalyst Criterion 1) without exposing the float directly.
 - `iv_percentile` uses a strict less-than empirical CDF, so `iv_percentile` approaches but does not reach 100 when `current_vol == max_vol_lookback`. Tests must not assert `iv_percentile == 100` in that boundary case (documented in REQ-DATA-02).
 - The zero-variance guard (flat series over the lookback window returns sentinel values `iv_rank = 50` with a note in the output string) prevents division-by-zero without raising exceptions, consistent with REQ-NFR-06.
+- **User-facing accuracy note:** The CLI and reports must label this metric as 'Volatility Environment Score' or explicitly annotate it as 'based on 30-day realised volatility, not implied volatility.' Using the label 'IV Rank' without qualification creates a false accuracy claim since the metric is correlated with but not equal to implied-vol-based IV Rank. This label decision must be captured in the PLAN and CLI implementation.
 
 ### Re-evaluation Trigger
 
-If a no-cost historical IV source becomes available via yfinance or as a free API, the proxy should be replaced with true historical implied volatility. REQ-DATA-02 Assumption A3 should be revisited at that point.
+**Re-evaluation triggers:** (1) Automated: If a regression test comparing `get_iv_metrics` output against a reference IV Rank source (added in a future integration test suite) shows >20 percentile point divergence for any of the three benchmark tickers (SPY, QQQ, AAPL), file a data-source review ticket. (2) Manual: If yfinance adds a `Ticker.iv_history()` or equivalent method in a future release (monitor yfinance changelogs at each dependency upgrade). If the realised-vol proxy diverges materially from a reference IV Rank (measured as >20 percentile points difference for the same ticker on the same date), the data source decision should be revisited.
 
 ---
 
@@ -77,7 +79,9 @@ If a no-cost historical IV source becomes available via yfinance or as a free AP
 
 ### Context
 
-The wheel state machine requires a `wheel_phase` field in `AgentState` to route graph execution across multiple invocations. The natural Python representation is a `WheelPhase` enum. However, LangGraph serialises `AgentState` to JSON via its checkpointer infrastructure, which is active at graph-compilation time regardless of whether `checkpoint_enabled` is set in the caller's config. Standard Python `Enum` instances are not JSON-serialisable by default. `WheelPhase(str, Enum)` members are themselves strings and therefore serialisable, but LangGraph's TypedDict schema validation has been observed to reject `Enum`-typed fields at `workflow.compile()` time in some LangGraph versions (SEV-REVIEW-02, first identified in SE cross-review of REQ v0.1.0).
+The wheel state machine requires a `wheel_phase` field in `AgentState` to route graph execution across multiple invocations. REQ-LIFE-01 directly prescribes `wheel_phase: Optional[str]` as an `AgentState` field and the `WheelPhase(str, Enum)` type as its value source. The product justification for `Optional[str]` is that it guarantees backwards-compatibility (REQ-NFR-01): any run where `wheel_phase` is not set behaves identically to the pre-wheel equity pipeline. REQ-LIFE-01 AC6 requires that an unknown `wheel_phase` value causes fallback to the equity-only path with a warning log.
+
+The natural Python representation is a `WheelPhase` enum. However, LangGraph serialises `AgentState` to JSON via its checkpointer infrastructure, which is active at graph-compilation time regardless of whether `checkpoint_enabled` is set in the caller's config. Standard Python `Enum` instances are not JSON-serialisable by default. `WheelPhase(str, Enum)` members are themselves strings and therefore serialisable, but LangGraph's TypedDict schema validation has been observed to reject `Enum`-typed fields at `workflow.compile()` time in some LangGraph versions (SEV-REVIEW-02, first identified in SE cross-review of REQ v0.1.0).
 
 `WheelPosition` also stores a phase value and is serialised to disk as JSON. A non-`str` enum in that model would cause `json.dumps` to raise `TypeError` at position-write time.
 
@@ -100,10 +104,12 @@ Unit tests assert against the literal string values (`assert state["wheel_phase"
 - Runtime type safety is reduced: any string can be written to `wheel_phase`, including misspellings. The unknown-value fallback in `route_wheel_phase()` provides a safety net but cannot distinguish a misspelled phase from a legitimate equity-only invocation.
 - Code that writes `wheel_phase` should always use the `WheelPhase` enum constants to prevent silent misspellings; this is a convention enforced by code review, not by the type system.
 - The `WheelPosition` JSON file, which also stores phase values as strings, is consistent with this approach.
+- **Product risk:** A `wheel_phase` string typo silently routes to the equity-only path. The warning log (required by REQ-LIFE-01 AC6) is the only user-visible signal. The CLI must surface this warning to the user (not just log it to stderr). This must be captured as a CLI requirement in the PLAN.
+- **Test coverage:** REQ-LIFE-01 AC6 ('unknown `wheel_phase` → equity path + warning') is verified by a unit test that passes an unrecognised string (e.g., `'invalid_phase'`) as `wheel_phase` in `AgentState` and asserts: (a) the graph routes to the first analyst node (equity path); (b) a warning is emitted (captured via `caplog` or `capfd`).
 
 ### Re-evaluation Trigger
 
-If a future LangGraph release adds first-class support for `str`-enum typed fields in TypedDicts with guaranteed JSON-safe checkpointing, the field type may be changed to `Optional[WheelPhase]` to restore static type safety.
+If a future LangGraph release adds first-class support for `str`-enum typed fields in TypedDicts with guaranteed JSON-safe checkpointing, the field type may be changed to `Optional[WheelPhase]` to restore static type safety. Monitor LangGraph release notes for `TypedDict` enum support in each version upgrade (add a checklist item to the dependency-upgrade runbook). Verify by compiling a test graph with an `Optional[WheelPhase]`-typed `AgentState` field and confirming the checkpointer round-trips it without error.
 
 ---
 
@@ -113,7 +119,7 @@ If a future LangGraph release adds first-class support for `str`-enum typed fiel
 |---|---|
 | **Status** | Decided |
 | **Date** | 2026-05-25 |
-| **Deciders** | SE-Author, SE-Review |
+| **Deciders** | SE-Author, PM-Author, SE-Review |
 
 ### Context
 
@@ -150,6 +156,12 @@ The five non-None `wheel_phase` values each map to a distinct target node:
 - The existing equity pipeline is entirely unaffected when `wheel_phase is None`: no analyst nodes, no CLI display, no config keys change (REQ-NFR-01).
 - All wheel nodes share the same `AgentState` TypedDict, so inter-node communication uses the same field-access pattern as the rest of the graph. New fields (`wheel_phase`, `wheel_candidate_report`, `csp_decision`, `cc_decision`, `roll_decision`) are all `Optional[str]` to preserve LangGraph checkpoint serialisability.
 - The `ConditionalLogic` constructor must receive the first analyst node name at `setup_graph()` time so that the `wheel_phase is None` pass-through can return the correct dynamic node name. This is a minor coupling increase but avoids dynamic node lookup inside the routing function.
+- **Single-ticker constraint:** Because `wheel_phase` and the wheel decision fields (`csp_decision`, `cc_decision`, `roll_decision`) are single-valued fields in `AgentState`, one `TradingAgentsGraph.propagate()` call handles exactly one ticker's wheel phase at a time. Running the wheel analysis on multiple tickers requires multiple sequential `propagate()` calls. This is consistent with US-05 and US-07 (which describe per-ticker position tracking via `wheel-status`) and the existing single-ticker propagation model. It is explicitly out of scope to support concurrent multi-ticker wheel analysis in a single graph invocation (REQ out-of-scope: 'Portfolio-level margin/buying-power calculation').
+- **Test coverage:** The single-ticker constraint is verified implicitly by all existing PROPERTIES tests (each test invokes one `propagate()` call per ticker). No additional test is required, but the PROPERTIES document must note that multi-ticker scenarios are tested as sequential independent calls, not concurrent ones.
+
+### Re-evaluation Trigger
+
+If LangGraph changes the `START` edge semantics, conditional edge return-value routing, or `StateGraph.compile()` validation in a way that rejects the preamble pattern, or if the equity pass-through integration test fails after any LangGraph version bump. If US-05 or US-07 acceptance criteria require multi-ticker batch management in a future phase, the shared-graph architecture will need to be revisited in favour of a per-ticker invocation loop or a dedicated `WheelGraph`.
 
 ---
 
@@ -191,10 +203,12 @@ The sentinel values use `tradeable=False` / `approved=False` to exempt themselve
 - `invoke_structured_or_freetext` returns `str` in all cases (FSPEC-SE2-01 carry-forward note). Any agent code that type-checks or branches on whether the result is a Pydantic instance vs. a string is incorrect.
 - The sentinel prevents graph crashes but introduces a potentially silent safe-fallback: if the LLM consistently fails schema validation, every run produces a `tradeable=False` result with no user-visible error. PROPERTIES tests must verify the sentinel path is exercised and that the returned state is detectable (non-empty `rationale` field).
 - `WheelAnalyst` uses `deep_think_llm` rather than the standard LLM because the five-criterion evaluation benefits from extended reasoning. `RollCheckAgent` uses `quick_think_llm` because roll/hold/close decisions are latency-sensitive (they occur on every invocation when `wheel_phase="csp_open"`).
+- **Distinguishability:** A sentinel `CspDecision(tradeable=False, rationale='Structured output failed — safe fallback applied.')` must be visually distinguishable from a genuine `tradeable=False` decision. The `rationale` field's sentinel marker string (`'Structured output failed — safe fallback applied.'`) must be checked by the CLI display layer and rendered with a distinct warning style. This sentinel marker string is a contract — it must not be changed without updating all consuming code.
+- **Test coverage:** The TSPEC specifies that the three-layer fallback is verified by unit tests that mock `invoke_structured_or_freetext` to return an unparseable string, then assert the agent returns the sentinel. The sentinel `tradeable=False` / `action='HOLD'` must be verified not to cause graph crashes downstream (graph must handle both genuine `tradeable=False` and sentinel `tradeable=False` identically). A dedicated property 'Agent returns sentinel on total structured output failure' must appear in PROPERTIES.
 
 ### Re-evaluation Trigger
 
-If `structured.py` is extended to perform JSON extraction from the free-text fallback internally (returning a Pydantic instance rather than a raw string), the agent-level `model_validate_json` step (step 3) may be removed. Any such change to `structured.py` requires updating all four wheel agents simultaneously.
+If `structured.py` is extended to perform JSON extraction from the free-text fallback internally (returning a Pydantic instance rather than a raw string), the agent-level `model_validate_json` step (step 3) may be removed. Any such change to `structured.py` requires updating all four wheel agents simultaneously. If the sentinel fires more than once per 100 runs in production (observable via log monitoring on the marker string), the structured output pipeline should be diagnosed.
 
 ---
 
@@ -204,7 +218,7 @@ If `structured.py` is extended to perform JSON extraction from the free-text fal
 |---|---|
 | **Status** | Decided |
 | **Date** | 2026-05-25 |
-| **Deciders** | SE-Author, PM-Author, SE-Review |
+| **Deciders** | SE-Author, PM-Author, SE-Review, TE-Review |
 
 ### Context
 
@@ -235,3 +249,8 @@ One JSON file per wheel cycle: `{positions_dir}/{ticker}-cycle-{N}.json`, where 
 - Concurrent access from two simultaneous analyses on the same ticker is not prevented by file locking — only by the atomic write pattern, which prevents partial reads but not interleaved writes. The usage model (one analysis at a time per ticker, initiated manually via CLI) makes this acceptable for MVP.
 - The `WheelPosition` schema adds two fields beyond the REQ-LIFE-02 schema definition: `csp_open_date: Optional[str]` (required to compute `cycle_duration_days` for the `cycle_annualised_return_pct` formula) and `prior_analyst_bias: Optional[str]` (required by RollCheckAgent Rule 5 — analyst-consensus-change detection). Both fields are documented as TSPEC-level schema extensions in TSPEC Section 9.1 and in the Traceability Gap Summary (Section 10.8).
 - `CcAgent`, `RollCheckAgent`, and `ConditionalLogic.route_wheel_phase()` all call `load_latest_open_position`. Each of these consumers accepts an injectable `_position_loader` callable (keyword-only, leading-underscore convention) so unit tests can supply a fixture `WheelPosition` without writing real files to disk.
+- **Orphan file risk:** If a wheel cycle is abandoned (graph crash after position file creation, before `CYCLE_COMPLETE`), the position file remains on disk indefinitely. The `wheel-status` CLI command (REQ-LIFE-06) will display this position as open. No automatic cleanup is provided. Users must manually delete abandoned position files. This is an acceptable MVP limitation documented in REQ Section 3 (Out of Scope: 'Portfolio-level margin / buying-power calculation').
+
+### Re-evaluation Trigger
+
+If the position directory grows to a scale where globbing all per-ticker JSON files becomes measurably slow (e.g., >500 cycle files, or `load_latest_open_position` exceeds 100ms on commodity hardware), or if the codebase introduces multi-ticker concurrent analysis that makes the single-file-per-cycle isolation insufficient. If users report stale/orphaned position files causing confusion in `wheel-status`, add a `tradingagents wheel-cleanup --dry-run` command in a future phase.
