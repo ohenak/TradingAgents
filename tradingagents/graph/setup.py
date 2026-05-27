@@ -112,6 +112,17 @@ class GraphSetup:
             wheel_analyst_node = create_wheel_analyst(self.deep_thinking_llm)
             workflow.add_node("wheel_analyst", wheel_analyst_node)
 
+            # Register per-agent options ToolNodes so each routes back to its own caller
+            _tn_wa = self.tool_nodes.get("options_wheel_analyst")
+            _tn_csp = self.tool_nodes.get("options_csp")
+            _tn_cc = self.tool_nodes.get("options_cc")
+            if _tn_wa is not None:
+                workflow.add_node("tools_options_wheel_analyst", _tn_wa)
+            if _tn_csp is not None:
+                workflow.add_node("tools_options_csp", _tn_csp)
+            if _tn_cc is not None:
+                workflow.add_node("tools_options_cc", _tn_cc)
+
             # Register options execution nodes
             csp_agent_node = create_csp_agent(self.deep_thinking_llm)
             cc_agent_node = create_cc_agent(self.deep_thinking_llm)
@@ -188,7 +199,20 @@ class GraphSetup:
         if wheel_selected:
             # Route through wheel_analyst before risk debate (ADR-WHEEL-03)
             workflow.add_edge("Trader", "wheel_analyst")
-            workflow.add_edge("wheel_analyst", "Aggressive Analyst")
+            # Conditional edge: wheel_analyst → tools_options_wheel_analyst (if tool calls) → back
+            # Otherwise → Aggressive Analyst
+            if self.tool_nodes.get("options_wheel_analyst") is not None:
+                workflow.add_conditional_edges(
+                    "wheel_analyst",
+                    self.conditional_logic.should_continue_wheel_analyst,
+                    {
+                        "tools_options_wheel_analyst": "tools_options_wheel_analyst",
+                        "Aggressive Analyst": "Aggressive Analyst",
+                    },
+                )
+                workflow.add_edge("tools_options_wheel_analyst", "wheel_analyst")
+            else:
+                workflow.add_edge("wheel_analyst", "Aggressive Analyst")
         else:
             workflow.add_edge("Trader", "Aggressive Analyst")
         workflow.add_conditional_edges(
@@ -228,7 +252,32 @@ class GraphSetup:
                     "__end__": END,
                 },
             )
-            workflow.add_edge("csp_agent", END)
+            # csp_agent: tool calls → tools_options_csp → back; otherwise → END
+            if self.tool_nodes.get("options_csp") is not None:
+                workflow.add_conditional_edges(
+                    "csp_agent",
+                    self.conditional_logic.should_continue_csp_agent,
+                    {
+                        "tools_options_csp": "tools_options_csp",
+                        "__end__": END,
+                    },
+                )
+                workflow.add_edge("tools_options_csp", "csp_agent")
+            else:
+                workflow.add_edge("csp_agent", END)
+            # cc_agent: tool calls → tools_options_cc → back; otherwise → END
+            if self.tool_nodes.get("options_cc") is not None:
+                workflow.add_conditional_edges(
+                    "cc_agent",
+                    self.conditional_logic.should_continue_cc_agent,
+                    {
+                        "tools_options_cc": "tools_options_cc",
+                        "__end__": END,
+                    },
+                )
+                workflow.add_edge("tools_options_cc", "cc_agent")
+            else:
+                workflow.add_edge("cc_agent", END)
         else:
             workflow.add_edge("Portfolio Manager", END)
 

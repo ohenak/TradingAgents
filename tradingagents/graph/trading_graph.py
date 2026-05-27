@@ -38,6 +38,12 @@ from tradingagents.agents.utils.agent_utils import (
     get_insider_transactions,
     get_global_news
 )
+from tradingagents.agents.utils.options_data_tools import (
+    get_iv_metrics,
+    get_options_chain,
+    get_options_greeks,
+    get_next_earnings_date,
+)
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
 from .conditional_logic import ConditionalLogic
@@ -188,6 +194,25 @@ class TradingAgentsGraph:
                     get_cashflow,
                     get_income_statement,
                 ]
+            ),
+            "options": ToolNode(
+                [
+                    # Options data tools for wheel agents
+                    get_iv_metrics,
+                    get_options_chain,
+                    get_options_greeks,
+                    get_next_earnings_date,
+                ]
+            ),
+            # Per-agent options ToolNodes so each agent routes back to itself
+            "options_wheel_analyst": ToolNode(
+                [get_iv_metrics, get_options_chain, get_options_greeks, get_next_earnings_date]
+            ),
+            "options_csp": ToolNode(
+                [get_options_chain, get_options_greeks, get_next_earnings_date]
+            ),
+            "options_cc": ToolNode(
+                [get_options_chain, get_options_greeks, get_next_earnings_date]
             ),
         }
 

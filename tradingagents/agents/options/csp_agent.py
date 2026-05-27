@@ -11,6 +11,7 @@ from datetime import datetime, date
 from typing import Any, Callable, Optional
 
 import pandas as pd
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from tradingagents.agents.schemas import (
@@ -140,6 +141,9 @@ def create_csp_agent(llm: Any) -> Callable[[AgentState, RunnableConfig], dict]:
         Callable that accepts (state, config) and returns a state-update dict.
     """
     structured_llm = bind_structured(llm, CspDecision, "csp_agent")
+    # Bind options tools so the LLM can call get_options_chain, get_options_greeks, etc.
+    _options_tools = [get_options_chain, get_options_greeks, get_next_earnings_date]
+    llm_with_tools = llm.bind_tools(_options_tools)
 
     def csp_agent(state: AgentState, config: RunnableConfig) -> dict:
         ticker = state["company_of_interest"]
@@ -202,6 +206,21 @@ Wheel Analyst Recommendation:
 
 If no suitable strike is found, return CspDecision with tradeable=False and rejection_reason.
 """
+
+        # Tool-call round: check if ToolMessage results are already in state (re-entry after ToolNode).
+        from langchain_core.messages import ToolMessage as _ToolMessage
+        messages = list(state.get("messages", []))
+        has_tool_results = any(isinstance(m, _ToolMessage) for m in messages)
+
+        if not has_tool_results:
+            invoke_messages = [HumanMessage(content=prompt)] + messages
+            try:
+                ai_msg = llm_with_tools.invoke(invoke_messages)
+                tool_calls = getattr(ai_msg, "tool_calls", None)
+                if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                    return {"messages": [ai_msg]}
+            except Exception as exc:
+                logger.warning("csp_agent: tool-bound invocation failed (%s); proceeding to structured output", exc)
 
         # --- Three-layer structured output fallback (ADR-WHEEL-04) ---
         decision: Optional[CspDecision] = None

@@ -831,6 +831,15 @@ def display_complete_report(final_state):
             console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
             console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
 
+    # Wheel Cycle Summary (when a cycle completes)
+    if final_state.get("wheel_cycle_summary_text"):
+        console.print(Panel(
+            Markdown(final_state["wheel_cycle_summary_text"]),
+            title="Wheel Cycle Summary",
+            border_style="yellow",
+            padding=(1, 2),
+        ))
+
 
 def update_research_team_status(status):
     """Update status for research team members (not Trader)."""
@@ -1309,8 +1318,6 @@ def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
             else ""
         )
         iv_note = ""
-        if report.iv_assessment and "IV range is flat" in report.iv_assessment:
-            iv_note = f"\n**Note:** {report.iv_assessment}"
 
         strike_range = (
             f"[{report.recommended_strike_range[0]:.2f}, {report.recommended_strike_range[1]:.2f}]"
@@ -1395,7 +1402,7 @@ def wheel_status(
             import json
             with open(fp, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            pos = WheelPosition(**data)
+            pos = WheelPosition.model_validate(data)
             if pos.wheel_phase == "cycle_complete":
                 completed_positions.append(pos)
             else:

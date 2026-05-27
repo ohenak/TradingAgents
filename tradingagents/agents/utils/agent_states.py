@@ -96,3 +96,7 @@ class AgentState(MessagesState):
         Optional[str],
         "Serialised JSON of RollDecision; written by RollCheckAgent, read by CLI layer"
     ]
+    wheel_cycle_summary_text: Annotated[
+        Optional[str],
+        "Rendered cycle summary text; written by wheel_cycle_summary node, read by CLI layer"
+    ]

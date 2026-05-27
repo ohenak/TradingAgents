@@ -144,7 +144,7 @@ def wheel_cycle_summary(state: AgentState, config: Optional[RunnableConfig] = No
         summary_text += f"Error computing cycle summary: {exc}\n"
 
     # PM-v2-F-01: return wheel_phase=None, NOT "screening"
-    return {"wheel_phase": None}
+    return {"wheel_phase": None, "wheel_cycle_summary_text": summary_text}
 
 
 def _write_memory_log(ticker: str, history_entry: dict, trade_date: str) -> None:

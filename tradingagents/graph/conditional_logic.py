@@ -154,6 +154,33 @@ class ConditionalLogic:
             return "tools_fundamentals"
         return "Msg Clear Fundamentals"
 
+    def should_continue_wheel_analyst(self, state: AgentState) -> str:
+        """Determine if wheel_analyst should call tools or proceed to next node."""
+        messages = state.get("messages", [])
+        if messages:
+            tool_calls = getattr(messages[-1], "tool_calls", None)
+            if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                return "tools_options_wheel_analyst"
+        return "Aggressive Analyst"
+
+    def should_continue_csp_agent(self, state: AgentState) -> str:
+        """Determine if csp_agent should call tools or finish."""
+        messages = state.get("messages", [])
+        if messages:
+            tool_calls = getattr(messages[-1], "tool_calls", None)
+            if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                return "tools_options_csp"
+        return "__end__"
+
+    def should_continue_cc_agent(self, state: AgentState) -> str:
+        """Determine if cc_agent should call tools or finish."""
+        messages = state.get("messages", [])
+        if messages:
+            tool_calls = getattr(messages[-1], "tool_calls", None)
+            if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                return "tools_options_cc"
+        return "__end__"
+
     def should_continue_debate(self, state: AgentState) -> str:
         """Determine if debate should continue."""
 

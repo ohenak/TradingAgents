@@ -184,11 +184,13 @@ def create_roll_check_agent(
 
         investment_plan = state.get("investment_plan", "")
 
-        # Check if analyst bias changed to bearish
-        analyst_bias_changed = False
-        if prior_analyst_bias and "bearish" not in prior_analyst_bias.lower():
-            if "sell" in investment_plan.lower() or "underweight" in investment_plan.lower():
-                analyst_bias_changed = True
+        # Check if analyst bias changed to bearish (S1: use _derive_analyst_bias for full keyword set)
+        current_bias = _derive_analyst_bias(investment_plan)
+        analyst_bias_changed = (
+            prior_analyst_bias is not None
+            and prior_analyst_bias == "bullish"
+            and current_bias == "bearish"
+        )
 
         prompt = f"""You are the RollCheckAgent, evaluating the open {wheel_phase or "wheel"} position for {ticker}
 on {trade_date}.
@@ -283,6 +285,49 @@ For ROLL: populate new_strike, new_expiration, new_dte, estimated_debit_or_credi
             )
             raw = render_roll_decision(decision)
 
+        # C2: Apply deterministic rule override — deterministic rules take precedence over LLM.
+        # Only override when at least one rule actually fires (any rule is True).
+        # When no rule fires, the LLM's decision stands (default HOLD from _resolve_priority
+        # is not a "firing" — it's just the safe default).
+        if decision is not None:
+            # Compute position-level inputs for rule evaluation
+            current_value_pct = getattr(decision, "current_value_pct_of_premium", 100.0) or 100.0
+            current_dte_val = getattr(decision, "current_dte", current_dte) or current_dte
+            # delta is not available without tool calls; use safe default 0.25 (normal range).
+            # Rules 3 (>0.85) and 4 (<0.10) won't fire at 0.25, which is the correct fallback.
+            abs_delta_val = abs(getattr(decision, "current_delta", 0.25) or 0.25)
+
+            det_rules = _evaluate_rules(
+                current_value_pct=current_value_pct,
+                current_dte=current_dte_val,
+                abs_delta=abs_delta_val,
+                earnings_within_cycle=False,
+                analyst_bias_changed=analyst_bias_changed,
+                wheel_phase=wheel_phase,
+                take_profit_pct=take_profit_pct,
+                dte_to_roll=dte_to_roll,
+            )
+            # Only override if at least one deterministic rule actually fired
+            any_rule_fired = any(det_rules.get(k) for k in ("rule1", "rule2", "rule3", "rule3_roll", "rule3_close", "rule4", "rule5"))
+            if any_rule_fired:
+                det_action, det_trigger = _resolve_priority(det_rules)
+                # Never downgrade a CLOSE to ROLL: if the LLM says CLOSE and the deterministic
+                # system says ROLL (e.g. due to Rule 2 at DTE=0 / expiry), keep CLOSE.
+                # CLOSE is always valid and deterministic ROLL at expiry would be operationally wrong.
+                should_override = (
+                    det_action != decision.action or det_trigger != decision.trigger_reason
+                ) and not (decision.action == "CLOSE" and det_action == "ROLL")
+                if should_override:
+                    logger.debug(
+                        "roll_check_agent: deterministic override LLM action=%s/trigger=%s → %s/%s",
+                        decision.action, decision.trigger_reason, det_action, det_trigger,
+                    )
+                    decision = decision.model_copy(update={
+                        "action": det_action,
+                        "trigger_reason": det_trigger,
+                    })
+                    raw = render_roll_decision(decision)
+
         # Persist prior_analyst_bias to WheelPosition (TSPEC §5.4)
         if position is not None:
             new_bias = _derive_analyst_bias(investment_plan)
@@ -297,8 +342,13 @@ For ROLL: populate new_strike, new_expiration, new_dte, estimated_debit_or_credi
 
         if decision is not None and decision.action == "CLOSE":
             if wheel_phase == WheelPhase.CSP_OPEN.value:
-                # Assignment detected (breach Rule 3 fires with action=CLOSE)
-                update["wheel_phase"] = WheelPhase.STOCK_OWNED.value
+                # B1: distinguish trigger_reason to route correctly
+                if decision.trigger_reason in ("breach_rule_close", "analyst_update"):
+                    # Buying back the put to exit — no stock received
+                    update["wheel_phase"] = WheelPhase.CYCLE_COMPLETE.value
+                else:
+                    # Manual assignment path (e.g. put exercised, stock received)
+                    update["wheel_phase"] = WheelPhase.STOCK_OWNED.value
             elif wheel_phase == WheelPhase.CC_OPEN.value:
                 # CC called away
                 update["wheel_phase"] = WheelPhase.CYCLE_COMPLETE.value

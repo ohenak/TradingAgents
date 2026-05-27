@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from tradingagents.agents.schemas import (
@@ -32,6 +33,9 @@ from tradingagents.dataflows.config import get_config
 
 logger = logging.getLogger(__name__)
 
+# Options tools used by wheel agents (shared constant)
+OPTIONS_TOOLS = [get_iv_metrics, get_options_chain, get_options_greeks, get_next_earnings_date]
+
 
 def create_wheel_analyst(llm: Any) -> Callable[[AgentState, RunnableConfig], dict]:
     """Factory returning the wheel_analyst node function.
@@ -43,6 +47,8 @@ def create_wheel_analyst(llm: Any) -> Callable[[AgentState, RunnableConfig], dic
         Callable that accepts (state, config) and returns a state-update dict.
     """
     structured_llm = bind_structured(llm, WheelCandidateReport, "wheel_analyst")
+    # Bind options tools so the LLM can call get_iv_metrics, get_options_chain, etc.
+    llm_with_tools = llm.bind_tools(OPTIONS_TOOLS)
 
     def wheel_analyst(state: AgentState, config: RunnableConfig) -> dict:
         ticker = state["company_of_interest"]
@@ -69,13 +75,6 @@ def create_wheel_analyst(llm: Any) -> Callable[[AgentState, RunnableConfig], dic
         dte_high = wheel_cfg.get("recommended_dte_high", 45)
         target_csp_delta_low = wheel_cfg.get("target_csp_delta_low", 0.20)
         target_csp_delta_high = wheel_cfg.get("target_csp_delta_high", 0.30)
-
-        # Build options tool list for prompt
-        tools = [get_iv_metrics, get_options_chain, get_options_greeks, get_next_earnings_date]
-
-        # Bind tools to the LLM (use the LLM directly here, not the structured version,
-        # since tool calling happens in the invocation below)
-        llm_with_tools = llm.bind_tools(tools)
 
         prompt = f"""You are the WheelAnalyst, responsible for evaluating whether {ticker} is
 suitable for the wheel options strategy as of {trade_date}.
@@ -140,6 +139,26 @@ After calling the data tools, produce a WheelCandidateReport JSON with:
 CRITICAL: All rejections must accumulate — report all failing criteria, not just the first.
 """
 
+        # Build message list for tool-calling round.
+        # On re-entry (after ToolNode), state["messages"] already contains the human message,
+        # AI tool-call message, and ToolMessage results — just use them directly.
+        from langchain_core.messages import ToolMessage as _ToolMessage
+        messages = list(state.get("messages", []))
+        has_tool_results = any(isinstance(m, _ToolMessage) for m in messages)
+
+        if not has_tool_results:
+            # First entry: inject the prompt and invoke with tool-binding.
+            # We include the prompt as context but only APPEND the AI response to state messages.
+            invoke_messages = [HumanMessage(content=prompt)] + messages
+            try:
+                ai_msg = llm_with_tools.invoke(invoke_messages)
+                tool_calls = getattr(ai_msg, "tool_calls", None)
+                if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                    # Return the AI message so LangGraph appends it and routes to ToolNode
+                    return {"messages": [ai_msg]}
+            except Exception as exc:
+                logger.warning("wheel_analyst: tool-bound invocation failed (%s); proceeding to structured output", exc)
+
         # --- Three-layer structured output fallback (ADR-WHEEL-04) ---
         report = None
         raw: str = ""
@@ -150,7 +169,7 @@ CRITICAL: All rejections must accumulate — report all failing criteria, not ju
                 result = structured_llm.invoke(prompt)
                 if isinstance(result, WheelCandidateReport):
                     report = result
-                    raw = render_wheel_candidate_report(report)
+                    raw = report.model_dump_json()
                 elif result is not None:
                     raw = str(result)
             except Exception as exc:
@@ -168,8 +187,10 @@ CRITICAL: All rejections must accumulate — report all failing criteria, not ju
         if report is None and raw:
             try:
                 report = WheelCandidateReport.model_validate_json(raw)
+                # Normalise to JSON so downstream parsers always see JSON
+                raw = report.model_dump_json()
             except Exception:
-                pass  # raw may be rendered markdown — valid for state storage
+                pass  # raw may be rendered markdown — keep as-is
 
         # Layer 3: sentinel on total failure
         if report is None and (not raw or raw.strip() == ""):
@@ -187,7 +208,7 @@ CRITICAL: All rejections must accumulate — report all failing criteria, not ju
                 recommended_dte_range=[28, 45],
                 rationale=STRUCTURED_OUTPUT_SENTINEL,
             )
-            raw = render_wheel_candidate_report(report)
+            raw = report.model_dump_json()
 
         return {"wheel_candidate_report": raw}
 
