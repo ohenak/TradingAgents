@@ -1,6 +1,7 @@
 import os
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
+_WHEEL_POSITIONS_DEFAULT = os.path.join(_TRADINGAGENTS_HOME, "wheel_positions")
 
 # Single source of truth for env-var → config-key overrides. To expose
 # a new config key for environment-based override, add a row here — no
@@ -41,7 +42,49 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+# ---------------------------------------------------------------------------
+# Wheel options trading — nested env var overrides (ADR-WHEEL-03, TSPEC §8.2)
+# ---------------------------------------------------------------------------
+# Note: _apply_env_overrides handles only flat top-level keys; wheel config
+# lives under config["wheel"] and needs a separate nested-override helper.
+# 20 entries, one per config["wheel"] key (plus positions_dir).
+
+_WHEEL_ENV_OVERRIDES = {
+    "TRADINGAGENTS_WHEEL_MIN_IV_RANK":              ("wheel", "min_iv_rank"),
+    "TRADINGAGENTS_WHEEL_EARNINGS_BUFFER_DAYS":     ("wheel", "earnings_buffer_days"),
+    "TRADINGAGENTS_WHEEL_MAX_WHEEL_STOCK_PRICE":    ("wheel", "max_wheel_stock_price"),
+    "TRADINGAGENTS_WHEEL_NEAR_THE_MONEY_PCT":       ("wheel", "near_the_money_pct"),
+    "TRADINGAGENTS_WHEEL_TARGET_CSP_DELTA_LOW":     ("wheel", "target_csp_delta_low"),
+    "TRADINGAGENTS_WHEEL_TARGET_CSP_DELTA_HIGH":    ("wheel", "target_csp_delta_high"),
+    "TRADINGAGENTS_WHEEL_TARGET_CC_DELTA_LOW":      ("wheel", "target_cc_delta_low"),
+    "TRADINGAGENTS_WHEEL_TARGET_CC_DELTA_HIGH":     ("wheel", "target_cc_delta_high"),
+    "TRADINGAGENTS_WHEEL_MIN_ANNUALISED_YIELD_PCT": ("wheel", "min_annualised_yield_pct"),
+    "TRADINGAGENTS_WHEEL_RECOMMENDED_DTE_LOW":      ("wheel", "recommended_dte_low"),
+    "TRADINGAGENTS_WHEEL_RECOMMENDED_DTE_HIGH":     ("wheel", "recommended_dte_high"),
+    "TRADINGAGENTS_WHEEL_OPTIONS_LOOKFORWARD_DAYS": ("wheel", "options_lookforward_days"),
+    "TRADINGAGENTS_WHEEL_TAKE_PROFIT_PCT":          ("wheel", "take_profit_pct"),
+    "TRADINGAGENTS_WHEEL_DTE_TO_ROLL":              ("wheel", "dte_to_roll"),
+    "TRADINGAGENTS_WHEEL_IV_RANK_LOOKBACK_DAYS":    ("wheel", "iv_rank_lookback_days"),
+    "TRADINGAGENTS_WHEEL_MIN_CHAIN_OI":             ("wheel", "min_chain_oi"),
+    "TRADINGAGENTS_WHEEL_MAX_CHAIN_SPREAD_PCT":     ("wheel", "max_chain_spread_pct"),
+    "TRADINGAGENTS_WHEEL_RISK_FREE_RATE_SOURCE":    ("wheel", "risk_free_rate_source"),
+    "TRADINGAGENTS_WHEEL_RISK_FREE_RATE_STATIC":    ("wheel", "risk_free_rate_static"),
+    "TRADINGAGENTS_WHEEL_POSITIONS_DIR":            ("wheel", "positions_dir"),
+}
+
+
+def _apply_nested_env_overrides(config: dict) -> dict:
+    """Apply TRADINGAGENTS_WHEEL_* env vars to nested config['wheel'] sub-dict."""
+    for env_var, (section, key) in _WHEEL_ENV_OVERRIDES.items():
+        raw = os.environ.get(env_var)
+        if raw is None or raw == "":
+            continue
+        reference = config.get(section, {}).get(key)
+        config[section][key] = _coerce(raw, reference)
+    return config
+
+
+DEFAULT_CONFIG = _apply_nested_env_overrides(_apply_env_overrides({
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
@@ -97,6 +140,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "options_data": "yfinance",          # Options: yfinance (alpha_vantage stub only)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
@@ -119,4 +163,52 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".AX":  "^AXJO",    # Australia (ASX 200)
         "":     "SPY",      # default for US-listed tickers (no suffix)
     },
-})
+    # -----------------------------------------------------------------------
+    # Wheel options trading configuration (TSPEC §8.1)
+    # All 18 keys have inline comments per REQ-NFR-07.
+    # Note: recommended_dte_low = 28 is authoritative (DEC-PLAN-01);
+    # REQ-TRADE-03 text "21–45 DTE" was corrected to "28–45" in REQ v0.3.0.
+    # All defaults below match REQ v0.3.0 §7 config table (authoritative).
+    # -----------------------------------------------------------------------
+    "wheel": {
+        # Screening thresholds
+        "min_iv_rank": 25,                    # int: minimum IV Rank to approve a wheel candidate
+        "earnings_buffer_days": 14,           # int: min days between target expiry and next earnings
+        "max_wheel_stock_price": 500.0,       # float: maximum stock price for cash manageability
+        "near_the_money_pct": 0.05,           # float: ±% of spot price defining near-the-money strikes (Criterion 2)
+                                              # REQ v0.3.0 §7 default: 0.05
+
+        # CSP parameters
+        "target_csp_delta_low": 0.20,         # float: lower bound of target put delta (inclusive)
+        "target_csp_delta_high": 0.30,        # float: upper bound of target put delta (inclusive)
+
+        # CC parameters
+        "target_cc_delta_low": 0.20,          # float: lower bound of target call delta (inclusive)
+        "target_cc_delta_high": 0.35,         # float: upper bound of target call delta (inclusive)
+
+        # Yield and timing
+        "min_annualised_yield_pct": 12.0,     # float: minimum annualised premium yield to accept a trade
+        "recommended_dte_low": 28,            # int: minimum DTE (calendar days) for new positions
+        "recommended_dte_high": 45,           # int: maximum DTE (calendar days) for new positions
+        "options_lookforward_days": 45,       # int: chain look-ahead window (calendar days); must be >= recommended_dte_high
+                                              # REQ v0.3.0 §7 default: 45
+
+        # Roll management
+        "take_profit_pct": 50.0,              # float: roll/close when contract value is at or below this % of premium received
+        "dte_to_roll": 21,                    # int: roll when DTE falls to or below this value (calendar days)
+
+        # IV computation
+        "iv_rank_lookback_days": 252,         # int: trading days for IV Rank/Percentile computation
+
+        # Liquidity filters
+        "min_chain_oi": 100,                  # int: minimum open interest for a strike to be liquid
+        "max_chain_spread_pct": 10.0,         # float: max bid/ask spread as % of mid for liquidity filter
+
+        # Risk-free rate
+        "risk_free_rate_source": "yfinance_irx",  # str: "yfinance_irx" or "static"
+        "risk_free_rate_static": 0.0525,      # float: static risk-free rate (decimal, not percent)
+
+        # Position persistence
+        "positions_dir": _WHEEL_POSITIONS_DEFAULT,  # str: directory for per-position JSON files
+    },
+}))

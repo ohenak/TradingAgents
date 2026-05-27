@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from typing_extensions import TypedDict
 from langgraph.graph import MessagesState
 
@@ -72,3 +72,31 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+
+    # Wheel options trading fields (Phases 2–4)
+    # All stored as raw JSON strings for LangGraph checkpoint serialisation.
+    # Agents deserialise on read using Schema.model_validate_json().
+    wheel_phase: Annotated[
+        Optional[str],
+        "WheelPhase string value ('screening', 'csp_open', 'stock_owned', 'cc_open', 'cycle_complete', or None for equity-only mode)"
+    ]
+    wheel_candidate_report: Annotated[
+        Optional[str],
+        "Serialised JSON of WheelCandidateReport; written by WheelAnalyst, read by CLI layer and CspAgent"
+    ]
+    csp_decision: Annotated[
+        Optional[str],
+        "Serialised JSON of CspDecision; written by CspAgent, read by CLI layer and risk debate"
+    ]
+    cc_decision: Annotated[
+        Optional[str],
+        "Serialised JSON of CcDecision; written by CcAgent, read by CLI layer and risk debate"
+    ]
+    roll_decision: Annotated[
+        Optional[str],
+        "Serialised JSON of RollDecision; written by RollCheckAgent, read by CLI layer"
+    ]
+    wheel_cycle_summary_text: Annotated[
+        Optional[str],
+        "Rendered cycle summary text; written by wheel_cycle_summary node, read by CLI layer"
+    ]

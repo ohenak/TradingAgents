@@ -19,9 +19,9 @@ so that:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -225,4 +225,279 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Wheel Options Trading schemas  (Phases 2–4)
+# ---------------------------------------------------------------------------
+
+
+class WheelPhase(str, Enum):
+    """Wheel strategy lifecycle phases. str, Enum ensures JSON-serialisability."""
+
+    SCREENING = "screening"
+    CSP_OPEN = "csp_open"
+    STOCK_OWNED = "stock_owned"
+    CC_OPEN = "cc_open"
+    CYCLE_COMPLETE = "cycle_complete"
+
+
+# TriggerReason is a Literal type alias, not an Enum, so it serialises
+# as a plain string in all contexts.
+TriggerReason = Literal[
+    "profit_capture",
+    "dte_rule",
+    "breach_rule_roll",
+    "breach_rule_close",
+    "earnings_rule",
+    "analyst_update",
+]
+
+
+class WheelCandidateReport(BaseModel):
+    """Wheel suitability screening report produced by WheelAnalyst."""
+
+    approved: bool = Field(
+        description="True if all five criteria passed and the stock is suitable for the wheel."
+    )
+    rejection_reason: Optional[str] = Field(
+        default=None,
+        description="Semicolon-delimited failure reasons when approved=False. Null when approved=True.",
+    )
+    iv_rank: float = Field(
+        description="Realised-vol-based IV Rank in [0, 100]."
+    )
+    iv_percentile: float = Field(
+        description="Fraction of lookback days with lower vol than today, expressed as [0, 100]."
+    )
+    iv_environment: Literal["elevated", "normal", "compressed"] = Field(
+        description="Derived from iv_rank: elevated>=50, normal 25-50, compressed<25."
+    )
+    iv_assessment: str = Field(
+        description="Plain-English summary of the current IV environment."
+    )
+    next_earnings_date: Optional[str] = Field(
+        default=None,
+        description="Next earnings date in YYYY-MM-DD format, or None if unavailable.",
+    )
+    earnings_clearance_ok: bool = Field(
+        description="True if next earnings is sufficiently beyond the target expiration."
+    )
+    liquidity_ok: bool = Field(
+        description="True if at least one near-the-money strike meets OI and spread criteria."
+    )
+    analyst_bias: Literal["bullish", "neutral", "bearish"] = Field(
+        description="Derived from the existing investment_plan recommendation field."
+    )
+    recommended_strike_range: list[float] = Field(
+        min_length=2,
+        max_length=2,
+        description="[low_strike, high_strike] anchored to target Delta bounds. Sentinel [0.0, 0.0] when approved=False.",
+    )
+    recommended_dte_range: list[int] = Field(
+        min_length=2,
+        max_length=2,
+        description="[dte_low, dte_high] in calendar days from config.",
+    )
+    rationale: str = Field(
+        description="Always-populated rationale string; non-empty even when approved=False."
+    )
+
+    @model_validator(mode="after")
+    def validate_approved_fields(self) -> "WheelCandidateReport":
+        """Enforce schema contract: approved=True requires positive strike range;
+        approved=False requires a rejection_reason. (TE-TSPEC-07)"""
+        if self.approved:
+            if not self.recommended_strike_range or len(self.recommended_strike_range) != 2:
+                raise ValueError("approved=True requires recommended_strike_range with 2 elements")
+            if any(v <= 0 for v in self.recommended_strike_range):
+                raise ValueError("approved=True requires positive strike range values")
+        else:
+            if not self.rejection_reason:
+                raise ValueError("approved=False requires a non-empty rejection_reason")
+        return self
+
+
+class CspDecision(BaseModel):
+    """Cash-secured put trade recommendation produced by CspAgent."""
+
+    tradeable: bool = Field(description="True if a viable CSP trade was found.")
+    rejection_reason: Optional[str] = Field(default=None)
+    ticker: str = Field(description="Equity ticker.")
+    option_type: Literal["put"] = Field(default="put")
+    strike: float = Field(description="Selected put strike price.")
+    expiration_date: str = Field(description="Expiration date in YYYY-MM-DD.")
+    dte: int = Field(description="Calendar days to expiration from trade_date.")
+    bid: float = Field(description="Put bid price.")
+    ask: float = Field(description="Put ask price.")
+    mid_premium: float = Field(description="(bid + ask) / 2.")
+    delta: float = Field(description="Put delta as a negative value, e.g. -0.25.")
+    theta: float = Field(description="Daily theta decay (<=0).")
+    annualised_yield_pct: float = Field(
+        description="(mid_premium / strike) * (365 / dte) * 100."
+    )
+    max_loss: float = Field(description="(strike * 100) - (mid_premium * 100) per contract.")
+    breakeven_price: float = Field(description="strike - mid_premium.")
+    probability_of_profit: float = Field(description="1 - abs(delta).")
+    earnings_clear: bool = Field(
+        description="True if selected expiration does not straddle an earnings date."
+    )
+    rationale: str = Field(description="Always-populated rationale string.")
+
+
+class CcDecision(BaseModel):
+    """Covered call trade recommendation produced by CcAgent."""
+
+    tradeable: bool = Field(description="True if a viable CC trade was found.")
+    rejection_reason: Optional[str] = Field(default=None)
+    ticker: str = Field(description="Equity ticker.")
+    option_type: Literal["call"] = Field(default="call")
+    strike: float = Field(description="Selected call strike price.")
+    expiration_date: str = Field(description="Expiration date in YYYY-MM-DD.")
+    dte: int = Field(description="Calendar days to expiration from trade_date.")
+    bid: float
+    ask: float
+    mid_premium: float = Field(description="(bid + ask) / 2.")
+    delta: float = Field(description="Call delta as a positive value, e.g. 0.25.")
+    theta: float = Field(description="Daily theta (<=0).")
+    annualised_yield_on_cost_pct: float = Field(
+        description="(mid_premium / cost_basis) * (365 / dte) * 100."
+    )
+    assigned_at: float = Field(description="The CSP strike from the prior WheelPosition.")
+    cost_basis: float = Field(description="assigned_at - csp_premium_received.")
+    strike_above_cost_basis: bool = Field(description="Computed: strike >= cost_basis.")
+    upside_to_strike_pct: float = Field(
+        description="(strike - current_price) / current_price * 100."
+    )
+    earnings_clear: bool
+    rationale: str = Field(description="Always-populated rationale string.")
+
+
+class RollDecision(BaseModel):
+    """Roll/hold/close recommendation produced by RollCheckAgent."""
+
+    action: Literal["HOLD", "ROLL", "CLOSE"] = Field(
+        description="Recommended action for the open position."
+    )
+    ticker: str
+    current_strike: float
+    current_expiration: str = Field(description="YYYY-MM-DD.")
+    current_dte: int = Field(description="Calendar days remaining.")
+    current_value_pct_of_premium: float = Field(
+        description="(current_contract_value / original_premium_received) * 100, in [0, 100]."
+    )
+    trigger_reason: TriggerReason = Field(
+        description="Which rule fired. One of six Literal values."
+    )
+    new_strike: Optional[float] = Field(default=None, description="Populated for ROLL action.")
+    new_expiration: Optional[str] = Field(default=None, description="YYYY-MM-DD. Populated for ROLL.")
+    new_dte: Optional[int] = Field(default=None)
+    estimated_debit_or_credit: Optional[float] = Field(
+        default=None,
+        description="new_mid_premium - current_contract_value. Positive=credit. Populated for ROLL.",
+    )
+    rationale: str = Field(description="Always-populated rationale string.")
+
+
+# ---------------------------------------------------------------------------
+# Wheel render helpers
+# ---------------------------------------------------------------------------
+
+def render_wheel_candidate_report(r: WheelCandidateReport) -> str:
+    """Render WheelCandidateReport to markdown string."""
+    parts = [
+        f"**Approved**: {'Yes' if r.approved else 'No'}",
+    ]
+    if r.rejection_reason:
+        parts.append(f"**Rejection Reason**: {r.rejection_reason}")
+    parts.extend([
+        f"**IV Rank (Volatility Environment Score, based on 30-day realised volatility)**: {r.iv_rank:.1f}",
+        f"**IV Percentile**: {r.iv_percentile:.1f}",
+        f"**IV Environment**: {r.iv_environment}",
+        f"**IV Assessment**: {r.iv_assessment}",
+        f"**Next Earnings Date**: {r.next_earnings_date or 'N/A'}",
+        f"**Earnings Clearance**: {'OK' if r.earnings_clearance_ok else 'FAIL'}",
+        f"**Liquidity OK**: {r.liquidity_ok}",
+        f"**Analyst Bias**: {r.analyst_bias}",
+        f"**Recommended Strike Range**: [{r.recommended_strike_range[0]:.2f}, {r.recommended_strike_range[1]:.2f}]",
+        f"**Recommended DTE Range**: [{r.recommended_dte_range[0]}, {r.recommended_dte_range[1]}] calendar days",
+        f"**Rationale**: {r.rationale}",
+    ])
+    return "\n".join(parts)
+
+
+def render_csp_decision(d: CspDecision) -> str:
+    """Render CspDecision to markdown string."""
+    parts = [
+        f"**Tradeable**: {d.tradeable}",
+        f"**Ticker**: {d.ticker}",
+        f"**Option Type**: {d.option_type}",
+        f"**Strike**: {d.strike}",
+        f"**Expiration**: {d.expiration_date}",
+        f"**DTE**: {d.dte}",
+        f"**Bid**: {d.bid}",
+        f"**Ask**: {d.ask}",
+        f"**Mid Premium**: {d.mid_premium:.2f}",
+        f"**Delta**: {d.delta:.4f}",
+        f"**Theta (daily)**: {d.theta:.4f}",
+        f"**Annualised Yield**: {d.annualised_yield_pct:.2f}%",
+        f"**Max Loss**: {d.max_loss:.2f}",
+        f"**Breakeven**: {d.breakeven_price:.2f}",
+        f"**Probability of Profit**: {d.probability_of_profit:.2%}",
+        f"**Earnings Clear**: {d.earnings_clear}",
+        f"**Rationale**: {d.rationale}",
+    ]
+    if d.rejection_reason:
+        parts.insert(1, f"**Rejection Reason**: {d.rejection_reason}")
+    return "\n".join(parts)
+
+
+def render_cc_decision(d: CcDecision) -> str:
+    """Render CcDecision to markdown string."""
+    parts = [
+        f"**Tradeable**: {d.tradeable}",
+        f"**Ticker**: {d.ticker}",
+        f"**Option Type**: {d.option_type}",
+        f"**Strike**: {d.strike}",
+        f"**Expiration**: {d.expiration_date}",
+        f"**DTE**: {d.dte}",
+        f"**Bid**: {d.bid}",
+        f"**Ask**: {d.ask}",
+        f"**Mid Premium**: {d.mid_premium:.2f}",
+        f"**Delta**: {d.delta:.4f}",
+        f"**Theta (daily)**: {d.theta:.4f}",
+        f"**Annualised Yield on Cost**: {d.annualised_yield_on_cost_pct:.2f}%",
+        f"**Assigned At**: {d.assigned_at}",
+        f"**Cost Basis**: {d.cost_basis:.2f}",
+        f"**Strike Above Cost Basis**: {d.strike_above_cost_basis}",
+        f"**Upside to Strike**: {d.upside_to_strike_pct:.2f}%",
+        f"**Earnings Clear**: {d.earnings_clear}",
+        f"**Rationale**: {d.rationale}",
+    ]
+    if d.rejection_reason:
+        parts.insert(1, f"**Rejection Reason**: {d.rejection_reason}")
+    return "\n".join(parts)
+
+
+def render_roll_decision(d: RollDecision) -> str:
+    """Render RollDecision to markdown string."""
+    parts = [
+        f"**Action**: {d.action}",
+        f"**Ticker**: {d.ticker}",
+        f"**Current Strike**: {d.current_strike}",
+        f"**Current Expiration**: {d.current_expiration}",
+        f"**Current DTE**: {d.current_dte}",
+        f"**Current Value (% of Premium)**: {d.current_value_pct_of_premium:.1f}%",
+        f"**Trigger Reason**: {d.trigger_reason}",
+    ]
+    if d.new_strike is not None:
+        parts.append(f"**New Strike**: {d.new_strike}")
+    if d.new_expiration is not None:
+        parts.append(f"**New Expiration**: {d.new_expiration}")
+    if d.new_dte is not None:
+        parts.append(f"**New DTE**: {d.new_dte}")
+    if d.estimated_debit_or_credit is not None:
+        parts.append(f"**Estimated Debit/Credit**: {d.estimated_debit_or_credit:.2f}")
+    parts.append(f"**Rationale**: {d.rationale}")
     return "\n".join(parts)

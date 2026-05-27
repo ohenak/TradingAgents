@@ -831,6 +831,15 @@ def display_complete_report(final_state):
             console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
             console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
 
+    # Wheel Cycle Summary (when a cycle completes)
+    if final_state.get("wheel_cycle_summary_text"):
+        console.print(Panel(
+            Markdown(final_state["wheel_cycle_summary_text"]),
+            title="Wheel Cycle Summary",
+            border_style="yellow",
+            padding=(1, 2),
+        ))
+
 
 def update_research_team_status(status):
     """Update status for research team members (not Trader)."""
@@ -1070,7 +1079,7 @@ def run_analysis(checkpoint: bool = False):
     # Now start the display layout
     layout = create_layout()
 
-    with Live(layout, refresh_per_second=4) as live:
+    with Live(layout, refresh_per_second=4):
         # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -1218,7 +1227,7 @@ def run_analysis(checkpoint: bool = False):
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
-        decision = graph.process_signal(final_state["final_trade_decision"])
+        graph.process_signal(final_state["final_trade_decision"])
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
@@ -1281,6 +1290,230 @@ def analyze(
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     run_analysis(checkpoint=checkpoint)
+
+
+def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
+    """Render a WheelCandidateReport as a Rich panel.
+
+    Style: bold red when approved=False, default when approved=True.
+    Surfaces ADR-WHEEL-01 zero-variance flat-range note in iv_assessment
+    deterministically from the schema field — not relying on LLM faithfulness
+    (REQ-DATA-02 AC5, REQ-SCREEN-02, PM-F-05).
+    """
+    from tradingagents.agents.schemas import WheelCandidateReport
+
+    approved = None
+    panel_content = f"## WheelCandidateReport\n\n{report_raw}"
+
+    try:
+        report = WheelCandidateReport.model_validate_json(report_raw)
+        approved = report.approved
+
+        # Build a structured display from schema fields (deterministic — not dependent on LLM)
+        # TSPEC §7.1 template
+        approval_line = "Approved: Yes" if report.approved else "Approved: No"
+        rejection_line = (
+            f"\nRejection Reason: {report.rejection_reason}"
+            if report.rejection_reason
+            else ""
+        )
+        iv_note = ""
+
+        strike_range = (
+            f"[{report.recommended_strike_range[0]:.2f}, {report.recommended_strike_range[1]:.2f}]"
+            if len(report.recommended_strike_range) == 2
+            else "N/A"
+        )
+        dte_range = (
+            f"[{report.recommended_dte_range[0]}, {report.recommended_dte_range[1]}] calendar days"
+            if len(report.recommended_dte_range) == 2
+            else "N/A"
+        )
+        rationale_text = report.rationale[:300] + ("..." if len(report.rationale) > 300 else "")
+
+        panel_content = (
+            f"## WheelCandidateReport\n\n"
+            f"{approval_line}{rejection_line}\n"
+            f"IV Rank: {report.iv_rank:.1f}\n"
+            f"IV Percentile: {report.iv_percentile:.1f}\n"
+            f"IV Environment: {report.iv_environment}\n"
+            f"IV Assessment: {report.iv_assessment}{iv_note}\n"
+            f"Earnings Clearance: {'OK' if report.earnings_clearance_ok else 'FAIL'}\n"
+            f"Recommended Strike Range: {strike_range}\n"
+            f"Recommended DTE Range: {dte_range}\n"
+            f"Rationale: {rationale_text}"
+        )
+    except Exception:
+        # Fall back to raw display if schema parsing fails
+        panel_content = f"## WheelCandidateReport\n\n{report_raw}"
+
+    border_style = "bold red" if approved is False else "green"
+
+    console_obj.print(
+        Panel(
+            Markdown(panel_content),
+            title="Wheel Suitability",
+            border_style=border_style,
+            padding=(1, 2),
+        )
+    )
+
+
+@app.command(name="wheel-status")
+def wheel_status(
+    positions_dir: str = typer.Option(
+        "",
+        "--positions-dir",
+        help="Override the positions directory (default: from config).",
+    ),
+):
+    """Display open and completed wheel positions.
+
+    Shows two tables:
+    1. Open positions (phases: csp_open, stock_owned, cc_open)
+    2. Completed cycles
+
+    Outputs 'No open wheel positions' when no open positions are found
+    (REQ-LIFE-06 AC2).
+    """
+    import glob
+    import os
+
+    from tradingagents.models.wheel_position import WheelPosition
+
+    # Resolve positions dir
+    pos_dir = positions_dir
+    if not pos_dir:
+        pos_dir = DEFAULT_CONFIG.get("wheel", {}).get("positions_dir", "memory/wheel_positions")
+
+    # Glob all position files
+    pattern = os.path.join(pos_dir, "*.json")
+    files = glob.glob(pattern)
+
+    if not files:
+        console.print("No open wheel positions")
+        return
+
+    open_positions = []
+    completed_positions = []
+
+    for fp in files:
+        try:
+            import json
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            pos = WheelPosition.model_validate(data)
+            if pos.wheel_phase == "cycle_complete":
+                completed_positions.append(pos)
+            else:
+                open_positions.append(pos)
+        except Exception as e:
+            console.print(f"[yellow]Warning: could not load {fp}: {e}[/yellow]")
+
+    # Table 1: Open positions
+    if not open_positions:
+        console.print("No open wheel positions")
+    else:
+        console.print(
+            Panel("[bold]Open Wheel Positions[/bold]", border_style="cyan")
+        )
+        open_table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            box=box.SIMPLE_HEAD,
+        )
+        open_table.add_column("Ticker", style="cyan")
+        open_table.add_column("Phase", style="green")
+        open_table.add_column("Strike")
+        open_table.add_column("Expiration")
+        open_table.add_column("DTE")
+        open_table.add_column("Cost Basis")
+        open_table.add_column("Premium Collected")
+        open_table.add_column("P&L")
+
+        for pos in open_positions:
+            # Determine active strike/expiration
+            strike = ""
+            expiry = ""
+            dte_str = ""
+            if pos.wheel_phase in ("csp_open",):
+                strike = str(pos.csp_strike or "")
+                expiry = pos.csp_expiration or ""
+            elif pos.wheel_phase in ("cc_open",):
+                strike = str(pos.cc_strike or "")
+                expiry = pos.cc_expiration or ""
+
+            # Compute DTE
+            if expiry:
+                try:
+                    exp_dt = datetime.datetime.strptime(expiry, "%Y-%m-%d").date()
+                    dte_val = (exp_dt - datetime.datetime.now().date()).days
+                    dte_str = str(dte_val)
+                except Exception:
+                    pass
+
+            cost_basis = ""
+            if pos.csp_strike and pos.csp_premium_received:
+                cost_basis = f"{pos.csp_strike - pos.csp_premium_received:.2f}"
+
+            premium = f"{pos.cumulative_premium_received:.2f}" if pos.cumulative_premium_received else "0.00"
+            pnl = f"{pos.cycle_pnl:.2f}" if pos.cycle_pnl is not None else "—"
+
+            open_table.add_row(
+                pos.ticker,
+                pos.wheel_phase or "",
+                strike,
+                expiry,
+                dte_str,
+                cost_basis,
+                premium,
+                pnl,
+            )
+
+        console.print(open_table)
+
+    # Table 2: Completed cycles
+    if completed_positions:
+        console.print(
+            Panel("[bold]Completed Wheel Cycles[/bold]", border_style="green")
+        )
+        completed_table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            box=box.SIMPLE_HEAD,
+        )
+        completed_table.add_column("Ticker", style="cyan")
+        completed_table.add_column("Cycle #")
+        completed_table.add_column("Duration (days)")
+        completed_table.add_column("Total Premium")
+        completed_table.add_column("P&L")
+        completed_table.add_column("Ann. Return %")
+
+        for pos in completed_positions:
+            ann_ret = f"{pos.cycle_annualised_return_pct:.2f}%" if pos.cycle_annualised_return_pct is not None else "—"
+            pnl = f"{pos.cycle_pnl:.2f}" if pos.cycle_pnl is not None else "—"
+            premium = f"{pos.cumulative_premium_received:.2f}" if pos.cumulative_premium_received else "0.00"
+
+            # Compute duration
+            duration = ""
+            if pos.csp_open_date and pos.call_away_date:
+                try:
+                    open_dt = datetime.datetime.strptime(pos.csp_open_date, "%Y-%m-%d")
+                    close_dt = datetime.datetime.strptime(pos.call_away_date, "%Y-%m-%d")
+                    duration = str((close_dt - open_dt).days)
+                except Exception:
+                    pass
+
+            completed_table.add_row(
+                pos.ticker,
+                str(pos.cycle_number),
+                duration,
+                premium,
+                pnl,
+                ann_ret,
+            )
+
+        console.print(completed_table)
 
 
 if __name__ == "__main__":
