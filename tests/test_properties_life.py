@@ -291,7 +291,7 @@ class TestBuildOptionsContextNoPastCycles:
 
         result = _build_options_context(state, _position_loader=lambda t, d: None)
         assert "Past Cycle Performance" not in result, (
-            f"PROP-LIFE-08: 'Past Cycle Performance' must NOT appear when position is None"
+            "PROP-LIFE-08: 'Past Cycle Performance' must NOT appear when position is None"
         )
 
     def test_equity_only_returns_empty_string(self):
@@ -333,7 +333,7 @@ class TestPriorAnalystBiasPersistence:
         mock_llm.with_structured_output.return_value = mock_structured
         return mock_llm
 
-    def _make_hold_decision(self) -> "RollDecision":
+    def _make_hold_decision(self):  # type: ignore[return]  # noqa: F821
         from tradingagents.agents.schemas import RollDecision
         return RollDecision(
             action="HOLD",

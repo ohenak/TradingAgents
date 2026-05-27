@@ -1079,7 +1079,7 @@ def run_analysis(checkpoint: bool = False):
     # Now start the display layout
     layout = create_layout()
 
-    with Live(layout, refresh_per_second=4) as live:
+    with Live(layout, refresh_per_second=4):
         # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -1227,7 +1227,7 @@ def run_analysis(checkpoint: bool = False):
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
-        decision = graph.process_signal(final_state["final_trade_decision"])
+        graph.process_signal(final_state["final_trade_decision"])
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
@@ -1311,7 +1311,7 @@ def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
 
         # Build a structured display from schema fields (deterministic — not dependent on LLM)
         # TSPEC §7.1 template
-        approval_line = "Approved: Yes" if report.approved else f"Approved: No"
+        approval_line = "Approved: Yes" if report.approved else "Approved: No"
         rejection_line = (
             f"\nRejection Reason: {report.rejection_reason}"
             if report.rejection_reason

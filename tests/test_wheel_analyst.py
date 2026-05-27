@@ -76,7 +76,7 @@ class TestWheelAnalystStructuredPath:
         from tradingagents.agents.analysts.wheel_analyst import create_wheel_analyst
 
         report = _make_wheel_candidate_report(approved=True)
-        rendered = render_wheel_candidate_report(report)
+        render_wheel_candidate_report(report)
 
         mock_llm = MagicMock()
         mock_structured = MagicMock()

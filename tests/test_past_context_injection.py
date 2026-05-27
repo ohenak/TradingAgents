@@ -194,7 +194,8 @@ class TestPositionLoaderInjectable:
         """
         from tradingagents.agents.utils.agent_utils import _build_options_context
 
-        no_op_loader = lambda t, d: None
+        def no_op_loader(t, d):
+            return None
 
         state = _make_state(wheel_phase="csp_open")
         result = _build_options_context(state, _position_loader=no_op_loader)

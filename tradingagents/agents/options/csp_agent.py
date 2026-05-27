@@ -65,7 +65,7 @@ def _filter_csp_candidates(
 
         bid = float(row.get("bid", 0))
         ask = float(row.get("ask", 0))
-        expiration_str = row.get("expiration", None) or row.get("contractSymbol", "")
+        _ = row.get("expiration", None) or row.get("contractSymbol", "")
         dte = int(row.get("dte", 30))
         mid = (bid + ask) / 2.0
 
@@ -153,8 +153,8 @@ def create_csp_agent(llm: Any) -> Callable[[AgentState, RunnableConfig], dict]:
 
         market_report = state.get("market_report", "")
         sentiment_report = state.get("sentiment_report", "")
-        news_report = state.get("news_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
+        state.get("news_report", "")
+        state.get("fundamentals_report", "")
         past_context = state.get("past_context", "")
 
         # Read WheelCandidateReport if available

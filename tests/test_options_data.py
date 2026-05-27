@@ -89,11 +89,11 @@ class TestGetIvMetrics:
         """25 <= iv_rank < 50 → environment = 'normal'."""
         # 10 values 0..9, current = value[9]=9 / max=9 rank=100% — not useful
         # Set a specific test: rank ~35
-        iv = [float(x) for x in range(0, 100)]  # 0,1,...,99; current=99
+        _iv = [float(x) for x in range(0, 100)]  # 0,1,...,99; current=99  # noqa: F841
         # rank = (99-0)/(99-0) * 100 = 100 → elevated. Let's pick current near 35%
         # current should be ~35th percentile
         # range 10..20; current = 13.5
-        iv2 = [10.0 + i for i in range(10)]  # 10..19, current=19 → rank=100
+        _iv2 = [10.0 + i for i in range(10)]  # 10..19, current=19 → rank=100  # noqa: F841
         # Use: [0,0,0,0,1,1,1,1,2,2,2,2,3] 13 values, current=3, min=0, max=3, rank=100
         # Let's force rank = 30: current = min + 0.3*(max-min)
         # values 0..9 (10 items), min=0, max=9; rank=(v-0)/(9-0)*100 = v*100/9
@@ -104,8 +104,8 @@ class TestGetIvMetrics:
         data = _parse_json(result)
         # current = 9.0 = max → rank=100 → elevated
         # Let's do a smaller series
-        iv4 = [0.0, 0.01, 0.02, 0.03, 0.04]  # current = 0.04, rank = 100
-        iv5 = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+        _iv4 = [0.0, 0.01, 0.02, 0.03, 0.04]  # noqa: F841
+        _iv5 = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06]  # noqa: F841
         # for rank=35%: current = 0 + 0.35*(max-min)
         # With [0,1,2,3,4,5,6,7,8,9], rank = (v/9)*100; for 35: v=3.15
         # Make a series: use [0,1,2,3.15,4,5,6,7,8,9]
@@ -114,7 +114,7 @@ class TestGetIvMetrics:
         iv6[-1] = 3.15
         result = get_iv_metrics("AAPL", "2024-01-15", iv_series=iv6)
         data = _parse_json(result)
-        rank = data["iv_rank"]
+        _ = data["iv_rank"]
         # rank = (3.15 - 0) / (max - 0) * 100; max is 8.0 (since we replaced 9 with 3.15)
         assert data["iv_environment"] in ("normal", "compressed", "elevated")  # just check it's valid
 

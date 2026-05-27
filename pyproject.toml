@@ -66,6 +66,8 @@ ignore = [
     "E501",   # line too long (handled by formatter separately)
     "E402",   # module level import not at top (common in LangGraph agent files)
     "F401",   # unused imports (many re-exported)
+    "F403",   # star imports — pre-existing pattern in cli/main.py and graph/setup.py
+    "F405",   # may be undefined from star import — pre-existing pattern
     "F811",   # redefinition of unused name
 ]
 

@@ -149,7 +149,7 @@ class TestIvEnvironmentBoundaries:
         # Want rank=50: current = 0 + 0.5*(max-0); with [0,1,2,3,4] max=4, current=2
         series = [0.0, 1.0, 2.0, 3.0, 4.0]
         series[-1] = 2.0  # set current = 2.0 (midpoint)
-        env = self._get_env(series)
+        _ = self._get_env(series)
         # current=2, min=0, max=3 (since we set last to 2.0, max=3 from index 3)
         # rank = (2-0)/(3-0)*100 = 66.7 → elevated
         # Let's build more precisely: series with max=4, min=0, current=2
@@ -285,7 +285,7 @@ class TestIrxFallbackToStaticRate:
             side_effect=Exception("network error"),
         ):
             try:
-                result = get_options_greeks(
+                get_options_greeks(
                     "AAPL",
                     "2024-01-01",
                     "2024-01-31",
