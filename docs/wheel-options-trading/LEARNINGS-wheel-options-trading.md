@@ -5,6 +5,7 @@
 | Feature | wheel-options-trading |
 | REQ | docs/wheel-options-trading/REQ-wheel-options-trading.md |
 | Date Completed | 2026-05-26 |
+| PR Review Addendum | 2026-05-27 (post-harvest /review findings C1–B2, S1–S4) |
 | Total Iterations | REQ: 2, FSPEC: 3, TSPEC: 2, DECISIONS: 3, PLAN: 3, PROPERTIES: 2, IMPL: 3 |
 | Upstream | REQ → FSPEC → TSPEC → DECISIONS → PLAN → PROPERTIES → IMPL |
 | Harvested from | CROSS-REVIEW-software-engineer-REQ.md, CROSS-REVIEW-test-engineer-REQ.md, CROSS-REVIEW-software-engineer-REQ-v2.md, CROSS-REVIEW-test-engineer-REQ-v2.md, CROSS-REVIEW-software-engineer-FSPEC.md, CROSS-REVIEW-test-engineer-FSPEC.md, CROSS-REVIEW-software-engineer-FSPEC-v2.md, CROSS-REVIEW-test-engineer-FSPEC-v2.md, CROSS-REVIEW-software-engineer-FSPEC-v3.md, CROSS-REVIEW-product-manager-TSPEC.md, CROSS-REVIEW-test-engineer-TSPEC.md, CROSS-REVIEW-product-manager-TSPEC-v2.md, CROSS-REVIEW-test-engineer-TSPEC-v2.md, CROSS-REVIEW-product-manager-DECISIONS.md, CROSS-REVIEW-test-engineer-DECISIONS.md, CROSS-REVIEW-product-manager-DECISIONS-v2.md, CROSS-REVIEW-test-engineer-DECISIONS-v2.md, CROSS-REVIEW-product-manager-DECISIONS-v3.md, CROSS-REVIEW-test-engineer-DECISIONS-v3.md, CROSS-REVIEW-product-manager-PLAN.md, CROSS-REVIEW-test-engineer-PLAN.md, CROSS-REVIEW-product-manager-PLAN-v2.md, CROSS-REVIEW-test-engineer-PLAN-v2.md, CROSS-REVIEW-product-manager-PLAN-v3.md, CROSS-REVIEW-test-engineer-PLAN-v3.md, CROSS-REVIEW-product-manager-PROPERTIES.md, CROSS-REVIEW-software-engineer-PROPERTIES.md, CROSS-REVIEW-product-manager-PROPERTIES-v2.md, CROSS-REVIEW-software-engineer-PROPERTIES-v2.md, CROSS-REVIEW-product-manager-IMPLEMENTATION.md, CROSS-REVIEW-test-engineer-IMPLEMENTATION.md, CROSS-REVIEW-product-manager-IMPLEMENTATION-v2.md, CROSS-REVIEW-test-engineer-IMPLEMENTATION-v2.md, CROSS-REVIEW-product-manager-IMPLEMENTATION-v3.md, CROSS-REVIEW-test-engineer-IMPLEMENTATION-v3.md |
@@ -189,3 +190,40 @@ Candidates for promotion that this harvest is not authorised to promote autonomo
 | TSPEC default deviations from REQ §7 require REQ amendment | TSPEC review checklist | Medium | Prevents three-way config contradictions masked by weak tests. |
 | Injectable test seam table required at TSPEC time for all external dependencies | TSPEC authoring guide / test-engineer TSPEC review checklist | Medium | Seams retrofitted at IMPL time are more disruptive and less complete. |
 | Progressive relaxation branches must have explicit REQ ACs and PROPERTIES entries | REQ authoring guide / PROPERTIES review checklist | Medium | Silent fallback-path failures are undetectable without per-branch coverage. |
+
+---
+
+## 6. Post-Harvest Addendum — PR Code Review Findings (2026-05-27)
+
+Findings surfaced by `/review` against PR #1 after the Phase H harvest was committed. All 8 findings were fixed before merge. Two were Critical (C1, C2) — both instances of production-path dead code not caught by the IMPL codebase reviews.
+
+### 6.1 Critical Findings
+
+| ID | Finding | Root Cause | Fix Applied |
+|---|---|---|---|
+| C1 | **ToolNode not wired — options agents cannot call tools.** `llm.bind_tools(tools)` was called and `llm_with_tools` assigned, but `llm_with_tools` was never used; the graph had no ToolNode for wheel_analyst, csp_agent, or cc_agent. Agents received a system prompt listing tools they could never execute. | PLAN did not enumerate outgoing edges from tool-using agents; no PROPERTIES property asserted tool-call reachability from the graph; IMPL reviewer did not trace `llm_with_tools` variable to a call site. | Added 3 ToolNodes (`options_wheel_analyst`, `options_csp`, `options_cc`); used `llm.bind_tools()` result in each agent; wired conditional loopback edges (agent → ToolNode → agent) in `setup.py`. |
+| C2 | **Deterministic rule override was dead code.** `_evaluate_rules()` and `_resolve_priority()` were defined and unit-tested in isolation but never called from `roll_agent`'s main execution path. The LLM result was used as-is; the 5-rule deterministic system described in the REQ had no effect at runtime. | Same dead-code failure mode as `_build_options_context` in IMPL v2 — PLAN task listed "implement function" but did not list the call site as a separate checklist item. Unit tests tested the functions directly, not the production call path. | Called `_evaluate_rules()` + `_resolve_priority()` after LLM; deterministic result overrides LLM decision. |
+
+### 6.2 Bug Findings
+
+| ID | Finding | Root Cause | Fix Applied |
+|---|---|---|---|
+| B1 | **CLOSE from `csp_open` always transitions to STOCK_OWNED.** Phase transition table in `conditional_logic.py` routed every CLOSE action from `csp_open` to STOCK_OWNED. But Rule 3b (breach-close, value < 50%) and Rule 5 (analyst-reversal) should route to CYCLE_COMPLETE — the trade is closed at a loss without taking delivery of stock. | REQ phase-transition table had the two CLOSE sub-cases but `route_wheel_phase()` implementation collapsed them to a single branch keyed on action="CLOSE" without reading `trigger_reason`. | Split CLOSE routing by `trigger_reason`: `breach_rule_close` and `analyst_update` → CYCLE_COMPLETE; all other CLOSE → STOCK_OWNED. |
+| B2 | **Markdown/JSON type mismatch silently zeroed strike range.** `wheel_analyst` stored the rendered markdown string of `WheelCandidateReport` in `state["wheel_candidate_report"]`. `csp_agent` called `WheelCandidateReport.model_validate_json(stored)` — which failed silently, fell through to a default, and produced `recommended_strike_range = [0.0, 0.0]` for every CSP. | PROPERTIES PROP-SCREEN-* specified the `wheel_candidate_report` field holds JSON but did not explicitly assert `model_validate_json` succeeds on the value stored by `wheel_analyst`. IMPL reviewer did not compare the write path (wheel_analyst) with the read path (csp_agent) for this state field. | Changed `wheel_analyst` to store `report.model_dump_json()` (raw JSON) not `render_wheel_candidate_report(report)` (markdown). Added PROP-SCREEN assertion for round-trip consistency. |
+
+### 6.3 Style/Minor Findings (S1–S4)
+
+| ID | Finding | Fix Applied |
+|---|---|---|
+| S1 | **Duplicate `iv_note` rendering in CLI panel.** `render_wheel_candidate_panel` rendered `iv_note` twice — once inline and once in a dedicated row. | Removed the duplicate inline render; kept only the dedicated row. |
+| S2 | **`wheel_cycle_summary_text` written to state but never read.** `wheel_cycle_summary` node set the field; no downstream node or CLI path consumed it. | Wired `wheel_cycle_summary_text` display in CLI `wheel-status` output. |
+| S3 | **`WheelPosition.model_validate(**data)` bypasses Pydantic validation.** `cli/main.py` constructed `WheelPosition` via `**data` dict unpacking, skipping Pydantic's model validation (type coercion, field validators). | Changed to `WheelPosition.model_validate(data)`. |
+| S4 | **`datetime.now()` called without module prefix.** `cli/main.py` imported `datetime` as a module but called `datetime.now()` — which fails at runtime (`module has no attribute now`). | Fixed to `datetime.datetime.now()`. |
+
+### 6.4 Addendum Process Learnings
+
+**[DOMAIN: pdlc-process] Dead-code risk requires call-site verification at two levels:** The two Critical findings (C1, C2) are both instances of the same failure mode — a function/object created but never placed on the production execution path. This recurred despite a process learning from IMPL v2 about `_build_options_context`. The IMPL codebase reviews at v2/v3 approved the code without catching C1 or C2. **Proposed rule upgrade:** In addition to the PLAN call-site checklist (§4 learning), the IMPL final reviewer must explicitly verify that every node/function listed in the PLAN's call-site checklist has a corresponding line in the production code that calls it. A function that passes its unit tests but is never called is not "done."
+
+**[DOMAIN: testing] State field write–read consistency must be a PROPERTIES property.** B2 (markdown/JSON mismatch) survived because the write path (wheel_analyst) and the read path (csp_agent) were tested in isolation. No PROPERTIES property asserted that `model_validate_json(state["wheel_candidate_report"])` succeeds without error. **Proposed rule:** For every cross-agent state field where one agent writes and another reads, PROPERTIES must include a round-trip property: write the value using the writing agent's actual code path, then read it using the reading agent's actual code path, and assert the result is valid.
+
+**[DOMAIN: langgraph] Phase transitions keyed on action alone are incorrect when the same action maps to different target phases.** B1 (CLOSE always → STOCK_OWNED) shows that routing on `action` alone is insufficient when the same action can have multiple trigger reasons with different routing implications. **Proposed rule:** `route_wheel_phase()` must read both `action` and `trigger_reason`; the PLAN phase-transition table must list every `(action, trigger_reason)` pair explicitly, not just action names.
