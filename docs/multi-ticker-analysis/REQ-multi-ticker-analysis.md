@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.4.0 |
+| **Version** | 0.5.0 |
 | **Created** | 2026-05-27 |
 | **Upstream** | Conversation context (user request) → **REQ** |
 | **Downstream** | FSPEC, TSPEC, PROPERTIES |
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.5.0 | 2026-05-27 | Final Low-finding cleanup: BATCH-02 AC1 detect_asset_type reference (SE-F-01/TE-F-02); API-01 asset_types length mismatch ValueError (SE-F-02); API-01 AC2 mock Given clause (TE-F-01) |
 | 0.4.0 | 2026-05-27 | Address SE and TE cross-review v3 findings: API-01 propagate_many gains optional asset_types parameter resolving library→CLI import boundary (SE-F-01); BATCH-06 None/absent wheel_candidate_report case added (SE-F-02); API-01 AC3 mock Given clause (TE-F-01); BATCH-04 AC2 failure summary clarified as BATCH-06 table (TE-F-02); §3 Assumptions updated with CRYPTO_SUFFIXES relocation note |
 | 0.3.0 | 2026-05-27 | Address SE and TE cross-review v2 findings: BATCH-06 wheel trigger changed to analyst-selection not state-presence (SE-F-01); API-01 detect_asset_type per ticker added (SE-F-02); BATCH-01 AC6 rewritten as mock-assertable propagate args (TE-F-01); BATCH-06 AC4 malformed-JSON fallback added (TE-F-02); BATCH-03 AC1 strict call_args_list ordering (SE-F-03); BATCH-02 AC1 single-init wording (SE-F-04); BATCH-05 AC1 timing wording (SE-F-05); BATCH-06 AC1 truncation clarified (TE-F-03); NFR-01 baseline-test creation note (TE-F-04); BATCH-04 AC5 KI test mechanism (TE-F-05); API-01 AC3 propagate return index (TE-F-06) |
 | 0.2.0 | 2026-05-27 | Address SE and TE cross-review v1 findings: specify per-ticker asset type detection (SE-F-03); acknowledge run_analysis refactoring scope (SE-F-02); add message_buffer decorator-rebinding requirement (SE-F-01); add normalize_ticker_symbol reference (TE-F-03); rewrite BATCH-03 ACs as mock-order assertions (TE-F-02, SE-F-04); resolve API-01 return type to BatchTickerResult (SE-F-05, TE-F-08); tighten BATCH-04 exception scope and exit codes (SE-F-06, TE-F-04, TE-F-05); specify BATCH-05 AC2 test mechanism (TE-F-06); specify BATCH-06 decision source field (TE-F-07); rewrite NFR-01 with concrete regression test criterion (SE-F-07, TE-F-01); fix NFR-02 format string (TE-F-10); add all-failure scenario (TE-F-11); add first-occurrence dedup order (TE-F-09); address low findings SE-F-08/F-10 |
@@ -117,7 +118,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of three tickers is configured with `anthropic` provider and `2026-05-27` date | all three analyses run | the single `TradingAgentsGraph` instance (initialised once before the loop) is used for all three `propagate()` calls with the same provider, model, date, and analyst set; asset type is determined per ticker by `detect_asset_type()` |
+| AC1 | Trader | a batch of three tickers is configured with `anthropic` provider and `2026-05-27` date | all three analyses run | the single `TradingAgentsGraph` instance (initialised once before the loop) is used for all three `propagate()` calls with the same provider, model, date, and analyst set; asset type is determined per ticker by the library-internal asset type detection function |
 | AC2 | Trader | a batch run is in progress | the second ticker begins | no configuration prompts are re-displayed; the loop advances automatically |
 
 **Dependencies:** REQ-BATCH-01
@@ -216,7 +217,7 @@ No summary table is printed for a single-ticker invocation.
 
 #### REQ-API-01 — `propagate_many` convenience method
 
-**Description:** `TradingAgentsGraph` exposes a `propagate_many(tickers, date, asset_types=None)` method where `asset_types: list[str] | None`. When `asset_types` is `None` (the default), the method calls a library-internal detection function in `tradingagents/` per ticker to determine asset type (stock or crypto) using `CRYPTO_SUFFIXES` suffix matching — no import from the CLI layer. When `asset_types` is provided as a list, those values are used directly (the caller is responsible for ensuring list length matches `tickers`). The CLI passes `None` to trigger auto-detection; script callers may pass explicit types. For each ticker, `propagate(ticker, date, asset_type=detected_or_provided_type)` is called. Returns a `list[BatchTickerResult]` in input order. `BatchTickerResult` is a dataclass with fields: `ticker: str`, `state: dict | None`, `decision: str | None`, `error: Exception | None`. On success: `state` and `decision` are populated, `error` is `None`. On failure: `state` and `decision` are `None`, `error` holds the caught exception. Only `Exception` subclasses are caught; `KeyboardInterrupt` and `SystemExit` propagate.
+**Description:** `TradingAgentsGraph` exposes a `propagate_many(tickers, date, asset_types=None)` method where `asset_types: list[str] | None`. When `asset_types` is `None` (the default), the method calls a library-internal detection function in `tradingagents/` per ticker to determine asset type (stock or crypto) using `CRYPTO_SUFFIXES` suffix matching — no import from the CLI layer. When `asset_types` is provided as a list, those values are used directly (the caller is responsible for ensuring list length matches `tickers`; if lengths differ, `ValueError` is raised with a descriptive message). The CLI passes `None` to trigger auto-detection; script callers may pass explicit types. For each ticker, `propagate(ticker, date, asset_type=detected_or_provided_type)` is called. Returns a `list[BatchTickerResult]` in input order. `BatchTickerResult` is a dataclass with fields: `ticker: str`, `state: dict | None`, `decision: str | None`, `error: Exception | None`. On success: `state` and `decision` are populated, `error` is `None`. On failure: `state` and `decision` are `None`, `error` holds the caught exception. Only `Exception` subclasses are caught; `KeyboardInterrupt` and `SystemExit` propagate.
 
 **Priority:** P2
 **Phase:** 1
@@ -227,7 +228,7 @@ No summary table is printed for a single-ticker invocation.
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
 | AC1 | Developer | `ta.propagate_many(["AAPL", "MSFT"], "2026-05-27")` is called with `propagate()` mocked | the call completes | a list of two `BatchTickerResult` objects is returned in input order; both have `error=None` and non-None `state` and `decision` |
-| AC2 | Developer | `propagate("BADTICKER", …)` raises `ValueError` inside `propagate_many` | the call completes | the `BadTicker` result has `state=None`, `decision=None`, `error=<ValueError instance>`; the subsequent ticker's result is populated normally |
+| AC2 | Developer | `propagate_many(["AAPL", "BADTICKER"], "2026-05-27")` is called with `propagate("BADTICKER", …)` mocked to raise `ValueError` and `propagate("AAPL", …)` mocked to succeed | the call completes | the BADTICKER result has `state=None`, `decision=None`, `error=<ValueError instance>`; the AAPL result is populated normally |
 | AC3 | Developer | `ta.propagate_many(["AAPL"], "2026-05-27")` is called with `propagate()` mocked to return a deterministic `(state, decision)` tuple | it completes | `result[0].decision == ta.propagate("AAPL", "2026-05-27")[1]` — the second element of the mocked `propagate()`'s `(final_state, decision)` return tuple |
 | AC4 | Developer | `ta.propagate_many(["AAPL", "BTC-USD"], "2026-05-27")` is called with `asset_types=None` and `propagate()` mocked | it completes | the library-internal detection function determines `asset_type="stock"` for AAPL and `asset_type="crypto"` for BTC-USD; `propagate("AAPL", …, asset_type="stock")` and `propagate("BTC-USD", …, asset_type="crypto")` are called with those types |
 | AC5 | Developer | `ta.propagate_many(["AAPL"], "2026-05-27", asset_types=["crypto"])` is called with `propagate()` mocked | it completes | `propagate("AAPL", …, asset_type="crypto")` is called with the explicitly provided type, bypassing internal detection |
