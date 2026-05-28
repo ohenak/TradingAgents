@@ -1,6 +1,6 @@
 # Requirements Traceability Matrix
 
-_Last updated: 2026-05-25 (REQ v0.3.0 — no new IDs; §7 config table and REQ-LIFE-02 schema updated in place)_
+_Last updated: 2026-05-27 (added Feature: Multi-Ticker Sequential Analysis v0.1.0)_
 
 ## Feature: Wheel Options Trading
 
@@ -27,6 +27,20 @@ _Last updated: 2026-05-25 (REQ v0.3.0 — no new IDs; §7 config table and REQ-L
 | US-08 | REQ-DATA-04 | Earnings date lookup tool | — | 1 | P0 |
 | US-10 | REQ-DATA-05 | Options tools registration | — | 1 | P0 |
 | US-10 | REQ-NFR-03 | Configurability via env vars | — | All | — |
+
+## Feature: Multi-Ticker Sequential Analysis
+
+| User Story | Requirement ID | Requirement Title | FSPEC | Phase | Priority |
+|---|---|---|---|---|---|
+| US-01 | REQ-BATCH-01 | Multi-ticker input at the CLI | — | 1 | P0 |
+| US-02 | REQ-BATCH-02 | Shared configuration across all tickers | — | 1 | P0 |
+| US-01, US-02 | REQ-BATCH-03 | Sequential execution | — | 1 | P0 |
+| US-04 | REQ-BATCH-04 | Error isolation | — | 1 | P1 |
+| US-05 | REQ-BATCH-05 | Per-ticker auto-save | — | 1 | P1 |
+| US-03 | REQ-BATCH-06 | Post-run summary table | — | 1 | P1 |
+| US-06 | REQ-API-01 | `propagate_many` convenience method | — | 1 | P2 |
+| US-01 | REQ-NFR-01 | No regressions on single-ticker flow | — | 1 | P0 |
+| US-01, US-04 | REQ-NFR-02 | Progress indication between tickers | — | 1 | P1 |
 
 ## Dependency Chain
 
