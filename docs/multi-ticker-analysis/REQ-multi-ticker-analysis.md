@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-27 |
 | **Upstream** | Conversation context (user request) → **REQ** |
 | **Downstream** | FSPEC, TSPEC, PROPERTIES |
-| **Cross-Reviews** | — |
+| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-REQ.md`, `CROSS-REVIEW-test-engineer-REQ.md` |
 | **LEARNINGS** | `docs/multi-ticker-analysis/LEARNINGS-multi-ticker-analysis.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.2.0 | 2026-05-27 | Address SE and TE cross-review v1 findings: specify per-ticker asset type detection (SE-F-03); acknowledge run_analysis refactoring scope (SE-F-02); add message_buffer decorator-rebinding requirement (SE-F-01); add normalize_ticker_symbol reference (TE-F-03); rewrite BATCH-03 ACs as mock-order assertions (TE-F-02, SE-F-04); resolve API-01 return type to BatchTickerResult (SE-F-05, TE-F-08); tighten BATCH-04 exception scope and exit codes (SE-F-06, TE-F-04, TE-F-05); specify BATCH-05 AC2 test mechanism (TE-F-06); specify BATCH-06 decision source field (TE-F-07); rewrite NFR-01 with concrete regression test criterion (SE-F-07, TE-F-01); fix NFR-02 format string (TE-F-10); add all-failure scenario (TE-F-11); add first-occurrence dedup order (TE-F-09); address low findings SE-F-08/F-10 |
 | 0.1.0 | 2026-05-27 | Initial draft |
 
 ---
@@ -45,13 +46,14 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 ## 3. Scope
 
 ### In Scope
-- CLI: comma-separated ticker input at the existing ticker prompt, OR a `--tickers` flag accepting a comma-separated list
+- CLI: comma-separated ticker input at the existing ticker prompt, OR a `--tickers` flag accepting a comma-separated list; the flag takes precedence and skips the interactive prompt
 - CLI: single shared configuration (LLM provider, model, analysis date, analyst selection, research depth, language) applied to all tickers in the batch
+- Per-ticker asset type detection using `detect_asset_type()` for each ticker individually; cross-type batches (e.g. stocks + crypto in the same batch) are supported
 - Sequential execution: one ticker completes fully before the next begins
 - Per-ticker auto-save to disk immediately after each analysis completes (existing save flow reused)
-- Error isolation: a ticker that raises an unhandled exception is logged with its error message; the batch continues
+- Error isolation: only `Exception` subclasses are caught and isolated per ticker; `KeyboardInterrupt` and `SystemExit` always propagate
 - Post-run summary table printed to the terminal once all tickers have been processed
-- Python API: `propagate_many(tickers, date)` convenience method returning a list of `(state, decision)` tuples
+- Python API: `propagate_many(tickers, date)` convenience method returning a list of `BatchTickerResult` objects
 
 ### Out of Scope
 - Parallel or concurrent analysis of multiple tickers
@@ -61,8 +63,11 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 - A dedicated batch config file format (YAML/JSON watchlist input)
 
 ### Assumptions
-- The existing `TradingAgentsGraph` and `propagate()` are reused without modification per ticker; this feature is a loop wrapper, not a graph change.
-- The existing per-ticker auto-save path (`results/{ticker}/{date}/`) is sufficient; no new directory structure is required.
+- **Graph reuse:** `TradingAgentsGraph` is initialised once before the batch loop; `propagate()` is called once per ticker. No graph recompilation occurs between tickers. This is architecturally sound: `propagate()` creates a fresh `AgentState` per call and does not mutate graph topology.
+- **Refactoring scope:** The current `run_analysis()` function in `cli/main.py` has `selections["ticker"]` wired into results directory creation, log file paths, spinner text, and graph initialisation. Implementing batch mode requires extracting ticker as a per-iteration parameter rather than a single selection value. This refactoring of `run_analysis()` is explicitly in scope for this feature.
+- **Message buffer rebinding:** The `message_buffer` in `cli/main.py` has its `add_message`, `add_tool_call`, and `update_report_section` methods monkey-patched with closures that capture per-ticker `log_file` and `report_dir` paths. The batch loop must re-bind these decorators for each ticker using that ticker's results directory. The `_processed_message_ids` set and all per-analysis state on the buffer must be cleared between tickers.
+- **Stats handler scope:** A new `StatsCallbackHandler` is created per ticker. Stats are displayed after each individual ticker's analysis completes, not aggregated across the batch.
+- The existing per-ticker auto-save path (`results/{TICKER}/{DATE}/`) is sufficient; no new directory structure is required.
 - Rate limits and API costs are the user's responsibility; no automatic throttling or cost-cap is added.
 - A batch of one ticker behaves identically to the current single-ticker flow.
 
@@ -76,7 +81,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-01 — Multi-ticker input at the CLI
 
-**Description:** The CLI `analyze` command accepts multiple ticker symbols in a single invocation. The user may enter a comma-separated list at the existing ticker prompt, or pass `--tickers AAPL,MSFT,NVDA` as a flag. Both forms are equivalent.
+**Description:** The CLI `analyze` command accepts multiple ticker symbols in a single invocation. The user may enter a comma-separated list at the existing ticker prompt, or pass `--tickers AAPL,MSFT,NVDA` as a flag. When `--tickers` is present the interactive ticker prompt is skipped. Each symbol is normalised using the existing `normalize_ticker_symbol()` function (strips whitespace, uppercases, preserves exchange suffixes such as `.TO`, `.T`, `.HK`). Deduplication preserves first-occurrence order.
 
 **Priority:** P0
 **Phase:** 1
@@ -86,11 +91,12 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | the CLI is launched with `tradingagents analyze` | the user enters `AAPL, MSFT, NVDA` at the ticker prompt (spaces optional) | the system normalises to `["AAPL", "MSFT", "NVDA"]` and processes all three |
-| AC2 | Trader | the CLI is launched with `tradingagents analyze --tickers AAPL,MSFT,NVDA` | the command starts | the ticker prompt is skipped and the batch list is taken from the flag |
-| AC3 | Trader | a single ticker is entered (no comma) | any entry method | behaviour is identical to the current single-ticker flow |
-| AC4 | Trader | the ticker list contains duplicates (e.g. `AAPL,AAPL`) | the command starts | duplicates are removed and each unique ticker is analysed once |
+| AC1 | Trader | the CLI is launched with `tradingagents analyze` | the user enters `AAPL, MSFT, NVDA` at the ticker prompt (spaces optional) | `normalize_ticker_symbol()` is called on each token; the resolved list is `["AAPL", "MSFT", "NVDA"]` |
+| AC2 | Trader | the CLI is launched with `tradingagents analyze --tickers AAPL,MSFT,NVDA` | the command starts | the interactive ticker prompt is not displayed; the batch list is `["AAPL", "MSFT", "NVDA"]` |
+| AC3 | Trader | a single ticker is entered (no comma, no `--tickers` flag) | any entry method | behaviour is identical to the current single-ticker flow |
+| AC4 | Trader | the ticker list contains duplicates (e.g. `NVDA,AAPL,NVDA`) | the command starts | duplicates are removed preserving first-occurrence order: `["NVDA", "AAPL"]`; each unique ticker is analysed once |
 | AC5 | Trader | an empty string or blank input is provided | the user submits the ticker prompt | the existing validation error is shown and the prompt is re-displayed |
+| AC6 | Trader | a batch contains both a stock (`AAPL`) and a crypto token (`BTC-USD`) | the batch executes | `detect_asset_type()` is called for each ticker individually; AAPL runs the stock pipeline, BTC-USD runs the crypto pipeline |
 
 **Dependencies:** None
 
@@ -98,7 +104,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-02 — Shared configuration across all tickers
 
-**Description:** All configuration choices made during the setup prompts (LLM provider, model, analysis date, analyst selection, research depth, output language) apply uniformly to every ticker in the batch. The user is prompted once; no per-ticker prompts appear.
+**Description:** All configuration choices made during the setup prompts (LLM provider, model, analysis date, analyst selection, research depth, output language) apply uniformly to every ticker in the batch. Asset type is the sole per-ticker value — it is detected automatically per ticker and is not a user-configurable shared setting. The user is prompted for shared settings once; no per-ticker configuration prompts appear.
 
 **Priority:** P0
 **Phase:** 1
@@ -108,7 +114,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of three tickers is configured with `anthropic` provider and `2026-05-27` date | all three analyses run | each ticker's graph is initialised with the same provider, model, date, and analyst set |
+| AC1 | Trader | a batch of three tickers is configured with `anthropic` provider and `2026-05-27` date | all three analyses run | each ticker's graph is initialised with the same provider, model, date, and analyst set; asset type is determined per ticker by `detect_asset_type()` |
 | AC2 | Trader | a batch run is in progress | the second ticker begins | no configuration prompts are re-displayed; the loop advances automatically |
 
 **Dependencies:** REQ-BATCH-01
@@ -117,7 +123,9 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-03 — Sequential execution
 
-**Description:** Tickers are analysed one at a time in the order provided. The next ticker begins only after the current ticker's analysis (including save and display) is fully complete.
+**Description:** Tickers are analysed one at a time in the order provided. The next ticker's `propagate()` call must not be made until the current ticker's `propagate()` call has returned. This is a strict ordering constraint, not a timing assertion.
+
+**Design constraint:** The batch loop must not invoke `propagate(ticker_N)` until `propagate(ticker_{N-1})` has returned. Verified by mock call order, not by wall-clock timing.
 
 **Priority:** P0
 **Phase:** 1
@@ -127,9 +135,8 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of `["AAPL", "MSFT"]` is running | AAPL's analysis is streaming | MSFT's analysis has not started |
-| AC2 | Trader | AAPL's analysis completes | the batch loop advances | MSFT begins immediately without user interaction |
-| AC3 | Trader | a batch of N tickers runs | all complete | total wall time ≥ sum of individual run times (no parallelism) |
+| AC1 | Trader | `propagate()` is mocked and a batch of `["AAPL", "MSFT"]` executes | the batch completes | `mock.assert_has_calls([call("AAPL", …), call("MSFT", …)])` passes, confirming AAPL was called and returned before MSFT was called |
+| AC2 | Trader | AAPL's `propagate()` call returns | the batch loop advances | MSFT's `propagate()` is called immediately in the same thread without user interaction |
 
 **Dependencies:** REQ-BATCH-01, REQ-BATCH-02
 
@@ -137,7 +144,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-04 — Error isolation
 
-**Description:** If a ticker's analysis raises an unhandled exception, the error is caught, logged to the terminal with the ticker symbol and error message, and the batch continues with the next ticker. The exit code reflects whether any ticker failed.
+**Description:** If a ticker's analysis raises an `Exception` subclass, it is caught, and a failure line is printed to the terminal in the format `[FAILED] {TICKER}: {ExceptionClassName}`. The batch continues with the next ticker. `KeyboardInterrupt` and `SystemExit` are not caught and always propagate immediately, aborting the batch.
 
 **Priority:** P1
 **Phase:** 1
@@ -147,9 +154,11 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of `["AAPL", "BADTICKER", "NVDA"]` is running | `BADTICKER` raises an exception | `BADTICKER` is marked as failed, the error is printed, and `NVDA` begins |
-| AC2 | Trader | one or more tickers fail | the batch completes | the CLI exits with a non-zero exit code and prints a failure summary |
-| AC3 | Trader | all tickers succeed | the batch completes | the CLI exits with code 0 |
+| AC1 | Trader | a batch of `["AAPL", "BADTICKER", "NVDA"]` is running and `propagate("BADTICKER", …)` raises `ValueError` | the exception is raised | the string `[FAILED] BADTICKER: ValueError` is printed to the terminal, and `propagate("NVDA", …)` is subsequently called |
+| AC2 | Trader | one or more tickers fail | the batch completes | the CLI exits with exit code `1` and prints a failure summary listing all failed tickers |
+| AC3 | Trader | all tickers succeed | the batch completes | the CLI exits with exit code `0` |
+| AC4 | Trader | all tickers in the batch fail | the batch completes | the CLI exits with exit code `1`; the summary table is still printed with all rows showing `Failed`; no partial results are suppressed |
+| AC5 | Trader | `propagate("AAPL", …)` raises `KeyboardInterrupt` | the exception is raised | the batch loop does not catch it; the process exits immediately without printing `[FAILED]` |
 
 **Dependencies:** REQ-BATCH-01, REQ-BATCH-03
 
@@ -157,7 +166,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-05 — Per-ticker auto-save
 
-**Description:** Each ticker's full analysis report is saved to disk immediately after its analysis completes, before the next ticker begins. The save path follows the existing convention: `results/{TICKER}/{DATE}/`.
+**Description:** Each ticker's full analysis report is saved to disk immediately after its `propagate()` call returns and before the next ticker begins. The save path follows the existing convention: `results/{TICKER}/{DATE}/`. The message_buffer decorators are rebound to this directory before the ticker's analysis starts.
 
 **Priority:** P1
 **Phase:** 1
@@ -167,9 +176,9 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of `["AAPL", "MSFT"]` runs | AAPL completes | `results/AAPL/{DATE}/` contains the saved report before MSFT begins |
-| AC2 | Trader | a batch run is interrupted after the second of three tickers | the user checks disk | reports for the first two tickers are present; the third is absent |
-| AC3 | Trader | save fails for one ticker (e.g. disk full) | the batch continues | the save failure is logged and treated as a non-fatal error (same as REQ-BATCH-04) |
+| AC1 | Trader | a batch of `["AAPL", "MSFT"]` runs with `propagate()` mocked to return a valid `final_state` | AAPL's mock returns | `results/AAPL/{DATE}/` contains the saved report, and `propagate("MSFT", …)` has not yet been called at the moment of save |
+| AC2 | Trader | a batch of `["AAPL", "MSFT", "NVDA"]` is run with `propagate()` mocked to raise `Exception` on the third call | the third call raises | `results/AAPL/{DATE}/` and `results/MSFT/{DATE}/` exist on disk; `results/NVDA/{DATE}/` does not |
+| AC3 | Trader | `save_report_to_disk()` raises an `OSError` for one ticker (e.g. disk full) | the save fails | the error is caught and treated as a non-fatal batch failure (same behaviour as REQ-BATCH-04 AC1); the batch continues |
 
 **Dependencies:** REQ-BATCH-03, REQ-BATCH-04
 
@@ -177,7 +186,9 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-BATCH-06 — Post-run summary table
 
-**Description:** After all tickers in the batch have been processed, a summary table is printed to the terminal. The table shows one row per ticker with: ticker symbol, final decision (Buy/Hold/Sell or wheel approval status), and status (success/failed).
+**Description:** After all tickers in the batch have been processed, a summary table is printed to the terminal. The table has one row per ticker with columns: **Ticker**, **Decision**, **Status**. The **Decision** value is extracted from the `final_trade_decision` key of the graph's final state dict; the first non-empty line of that string is used, truncated to 50 characters. For wheel-mode batches where `wheel_candidate_report` is present in state, the **Decision** value is instead `Approved` or `Rejected` derived from `WheelCandidateReport.approved`. Failed tickers show an empty **Decision** and `Failed` in **Status**.
+
+No summary table is printed for a single-ticker invocation.
 
 **Priority:** P1
 **Phase:** 1
@@ -187,10 +198,10 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of three tickers completes with all succeeding | the last ticker finishes | a table with three rows is printed, one per ticker, with symbol, decision, and "Success" |
-| AC2 | Trader | one ticker in the batch failed | the summary is printed | the failed ticker's row shows "Failed" and the error class; decision cell is blank |
-| AC3 | Trader | a single-ticker invocation runs | it completes | no summary table is printed (single-ticker flow is unchanged) |
-| AC4 | Trader | wheel mode is active | the batch summary is printed | the wheel approval verdict (Approved/Rejected) is shown in the decision column instead of Buy/Hold/Sell |
+| AC1 | Trader | a batch of three tickers completes with all succeeding | the last ticker finishes | a table with three rows is printed; each row has the ticker symbol, the first non-empty line of `final_trade_decision` (≤ 50 chars), and `Success` |
+| AC2 | Trader | one ticker in the batch failed | the summary is printed | the failed ticker's row shows `Failed` in **Status** and an empty **Decision** cell |
+| AC3 | Trader | a single-ticker invocation runs | it completes | no summary table is printed; the existing per-ticker output is unchanged |
+| AC4 | Trader | wheel mode is active and `wheel_candidate_report` is in state | the batch summary is printed | the **Decision** column shows `Approved` (if `WheelCandidateReport.approved == True`) or `Rejected` (if `False`) |
 
 **Dependencies:** REQ-BATCH-03, REQ-BATCH-04
 
@@ -202,7 +213,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-API-01 — `propagate_many` convenience method
 
-**Description:** `TradingAgentsGraph` exposes a `propagate_many(tickers, date)` method that iterates over the ticker list, calls `propagate()` for each, collects results, and returns a list of `(ticker, state, decision)` tuples. Errors per ticker are caught and represented as `(ticker, None, None)` with the exception stored in a separate errors dict.
+**Description:** `TradingAgentsGraph` exposes a `propagate_many(tickers, date)` method. It iterates over the ticker list, calls `propagate()` for each, and returns a `list[BatchTickerResult]` in input order. `BatchTickerResult` is a dataclass with fields: `ticker: str`, `state: dict | None`, `decision: str | None`, `error: Exception | None`. On success: `state` and `decision` are populated, `error` is `None`. On failure: `state` and `decision` are `None`, `error` holds the caught exception. Only `Exception` subclasses are caught; `KeyboardInterrupt` and `SystemExit` propagate.
 
 **Priority:** P2
 **Phase:** 1
@@ -212,9 +223,9 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Developer | `ta.propagate_many(["AAPL", "MSFT"], "2026-05-27")` is called | the call completes | a list of two `(ticker, state, decision)` tuples is returned in input order |
-| AC2 | Developer | one ticker raises an exception inside `propagate()` | `propagate_many` continues | the failing ticker's tuple is `(ticker, None, None)`; subsequent tickers still run |
-| AC3 | Developer | `propagate_many(["AAPL"], "2026-05-27")` is called with a single ticker | it completes | result is equivalent to calling `propagate("AAPL", "2026-05-27")` directly |
+| AC1 | Developer | `ta.propagate_many(["AAPL", "MSFT"], "2026-05-27")` is called with `propagate()` mocked | the call completes | a list of two `BatchTickerResult` objects is returned in input order; both have `error=None` and non-None `state` and `decision` |
+| AC2 | Developer | `propagate("BADTICKER", …)` raises `ValueError` inside `propagate_many` | the call completes | the `BadTicker` result has `state=None`, `decision=None`, `error=<ValueError instance>`; the subsequent ticker's result is populated normally |
+| AC3 | Developer | `ta.propagate_many(["AAPL"], "2026-05-27")` is called | it completes | `result[0].decision` is equal to the `decision` returned by `ta.propagate("AAPL", "2026-05-27")` called directly |
 
 **Dependencies:** None (wraps existing `propagate`)
 
@@ -226,7 +237,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-NFR-01 — No regressions on single-ticker flow
 
-**Description:** The existing single-ticker interactive flow must behave identically before and after this feature ships. No prompts, display output, save paths, or graph behaviour may change for single-ticker invocations.
+**Description:** The existing single-ticker interactive flow must behave identically before and after this feature ships. No prompts, display output, save paths, or graph behaviour may change for single-ticker invocations. Regression is verified by a parameterised integration test that exercises both the pre-feature single-ticker path and the post-feature single-ticker path through the same helper, asserting on: (a) the sequence of `questionary` prompt calls (mocked), (b) the results directory path format `results/{TICKER}/{DATE}/`, and (c) the set of Rich panel titles rendered to the console.
 
 **Priority:** P0
 **Phase:** 1
@@ -236,7 +247,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a user enters a single ticker (no comma) via the existing prompt | analysis completes | all prompts, output panels, and save paths are identical to the pre-feature behaviour |
+| AC1 | Trader | `propagate()` and `questionary` are mocked; a single ticker `AAPL` is analysed via the updated CLI | analysis completes | the ordered list of `questionary` prompt call names, the resolved results path `results/AAPL/{DATE}/`, and the set of Rich panel titles are identical to those asserted in the pre-feature baseline integration test |
 
 **Dependencies:** REQ-BATCH-01
 
@@ -244,7 +255,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 #### REQ-NFR-02 — Progress indication between tickers
 
-**Description:** The terminal must clearly indicate which ticker is currently being analysed and how many remain (e.g. `[2/5] Analyzing MSFT…`), so the user knows the batch is progressing and hasn't stalled.
+**Description:** The terminal must clearly indicate which ticker is currently being analysed and how many remain. The header format is exactly: `[{N}/{TOTAL}] Analyzing {TICKER} on {DATE}` where `N` is the 1-based index, `TOTAL` is the total ticker count, `TICKER` is the normalised symbol, and `DATE` is the analysis date in `YYYY-MM-DD` format. This line is printed before the analysis output for that ticker.
 
 **Priority:** P1
 **Phase:** 1
@@ -254,7 +265,7 @@ The gap: no mechanism exists to pass a list of tickers and have the system analy
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AC1 | Trader | a batch of five tickers is running | the third ticker begins | the terminal prints a header such as `[3/5] Analyzing GOOGL on 2026-05-27` before the analysis output |
+| AC1 | Trader | a batch of five tickers is running and `propagate()` is mocked | the third ticker begins | the terminal output contains the string `[3/5] Analyzing {TICKER} on {DATE}` matching the pattern `\[\d+/\d+\] Analyzing \S+ on \d{4}-\d{2}-\d{2}` before that ticker's analysis output |
 
 **Dependencies:** REQ-BATCH-03
 
@@ -285,5 +296,4 @@ REQ-NFR-02 — depends on REQ-BATCH-03
 |---|---|---|---|
 | OQ-01 | Should `--tickers` accept a path to a text file (one ticker per line) as an alternative input form? | Scope — adds file-input parsing | User |
 | OQ-02 | Should the summary table include per-ticker wall-clock duration? | P2 UX nicety — low effort | User |
-| OQ-03 | For wheel mode batches, should the summary table include IV Rank and approved/rejected alongside the decision? | Scope of REQ-BATCH-06 AC4 | User |
-| OQ-04 | Should a `--tickers-file` flag be a P1 or remain out of scope for this phase? | Phase boundary | User |
+| OQ-03 | For wheel mode batches, should the summary table include IV Rank alongside Approved/Rejected? | Scope of REQ-BATCH-06 AC4 | User |
