@@ -43,8 +43,10 @@ class GraphSetup:
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
         """
+        # "wheel" is handled separately after Trader; strip it before building the pipeline plan
+        pipeline_analysts = [a for a in selected_analysts if a != "wheel"]
         plan = build_analyst_execution_plan(
-            selected_analysts,
+            pipeline_analysts,
             concurrency_limit=self.analyst_concurrency_limit,
         )
 

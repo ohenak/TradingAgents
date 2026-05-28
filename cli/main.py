@@ -47,7 +47,7 @@ class MessageBuffer:
     # Fixed teams that always run (not user-selectable)
     FIXED_AGENTS = {
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
+        "Trading Team": ["Trader", "Wheel Analyst"],
         "Risk Management": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
         "Portfolio Management": ["Portfolio Manager"],
     }
@@ -58,6 +58,7 @@ class MessageBuffer:
         "social": "Sentiment Analyst",
         "news": "News Analyst",
         "fundamentals": "Fundamentals Analyst",
+        "wheel": "Wheel Analyst",
     }
 
     # Report section mapping: section -> (analyst_key for filtering, finalizing_agent)
@@ -68,6 +69,7 @@ class MessageBuffer:
         "sentiment_report": ("social", "Sentiment Analyst"),
         "news_report": ("news", "News Analyst"),
         "fundamentals_report": ("fundamentals", "Fundamentals Analyst"),
+        "wheel_candidate_report": ("wheel", "Wheel Analyst"),
         "investment_plan": (None, "Research Manager"),
         "trader_investment_plan": (None, "Trader"),
         "final_trade_decision": (None, "Portfolio Manager"),
@@ -220,6 +222,9 @@ class MessageBuffer:
         if self.report_sections.get("trader_investment_plan"):
             report_parts.append("## Trading Team Plan")
             report_parts.append(f"{self.report_sections['trader_investment_plan']}")
+        if self.report_sections.get("wheel_candidate_report"):
+            report_parts.append("## Wheel Suitability Report")
+            report_parts.append(f"{self.report_sections['wheel_candidate_report']}")
 
         # Portfolio Management Decision
         if self.report_sections.get("final_trade_decision"):
@@ -291,7 +296,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
             "Fundamentals Analyst",
         ],
         "Research Team": ["Bull Researcher", "Bear Researcher", "Research Manager"],
-        "Trading Team": ["Trader"],
+        "Trading Team": ["Trader", "Wheel Analyst"],
         "Risk Management": ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"],
         "Portfolio Management": ["Portfolio Manager"],
     }
@@ -810,6 +815,8 @@ def display_complete_report(final_state):
     if final_state.get("trader_investment_plan"):
         console.print(Panel("[bold]III. Trading Team Plan[/bold]", border_style="yellow"))
         console.print(Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2)))
+    if final_state.get("wheel_candidate_report"):
+        render_wheel_candidate_panel(final_state["wheel_candidate_report"], console)
 
     # IV. Risk Management Team
     if final_state.get("risk_debate_state"):
@@ -848,8 +855,10 @@ def update_research_team_status(status):
         message_buffer.update_agent_status(agent, status)
 
 
-# Ordered list of analysts for status transitions
-ANALYST_ORDER = ["market", "social", "news", "fundamentals"]
+# Ordered list of analysts for status transitions (includes "wheel" so it appears in selections)
+ANALYST_ORDER = ["market", "social", "news", "fundamentals", "wheel"]
+# Keys that feed into the standard analyst pipeline (wheel runs separately after Trader)
+ANALYST_PIPELINE_KEYS = ["market", "social", "news", "fundamentals"]
 ANALYST_AGENT_NAMES = {
     "market": "Market Analyst",
     "social": "Sentiment Analyst",
@@ -881,7 +890,7 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     if wall_time_tracker is not None:
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
 
-    for analyst_key in ANALYST_ORDER:
+    for analyst_key in ANALYST_PIPELINE_KEYS:
         if analyst_key not in selected:
             continue
 
@@ -1008,8 +1017,18 @@ def run_analysis(checkpoint: bool = False):
     # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
     selected_set = {analyst.value for analyst in selections["analysts"]}
     selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+    # Execution plan only covers standard pipeline analysts (wheel runs after Trader, not here)
+    pipeline_analyst_keys = [a for a in selected_analyst_keys if a in ANALYST_PIPELINE_KEYS]
+    # Wheel requires the full analysis pipeline upstream; default to all four if none were chosen
+    if not pipeline_analyst_keys and "wheel" in selected_analyst_keys:
+        console.print(
+            "[yellow]Wheel Analyst requires at least one standard analyst upstream. "
+            "Defaulting to all four analysts.[/yellow]"
+        )
+        pipeline_analyst_keys = list(ANALYST_PIPELINE_KEYS)
+        selected_analyst_keys = pipeline_analyst_keys + ["wheel"]
     analyst_execution_plan = build_analyst_execution_plan(
-        selected_analyst_keys,
+        pipeline_analyst_keys,
         concurrency_limit=config["analyst_concurrency_limit"],
     )
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
@@ -1098,7 +1117,7 @@ def run_analysis(checkpoint: bool = False):
         # Update agent status to in_progress for the first analyst
         first_analyst = get_initial_analyst_node(analyst_execution_plan)
         message_buffer.update_agent_status(first_analyst, "in_progress")
-        analyst_wall_time_tracker.mark_started(selected_analyst_keys[0])
+        analyst_wall_time_tracker.mark_started(pipeline_analyst_keys[0])
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Create spinner text
@@ -1178,6 +1197,18 @@ def run_analysis(checkpoint: bool = False):
                 )
                 if message_buffer.agent_status.get("Trader") != "completed":
                     message_buffer.update_agent_status("Trader", "completed")
+                    if message_buffer.agent_status.get("Wheel Analyst") is not None:
+                        message_buffer.update_agent_status("Wheel Analyst", "in_progress")
+                    else:
+                        message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
+
+            # Wheel Analyst (runs after Trader when wheel mode is selected)
+            if chunk.get("wheel_candidate_report"):
+                message_buffer.update_report_section(
+                    "wheel_candidate_report", chunk["wheel_candidate_report"]
+                )
+                if message_buffer.agent_status.get("Wheel Analyst") != "completed":
+                    message_buffer.update_agent_status("Wheel Analyst", "completed")
                     message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
 
             # Risk Management Team - Handle Risk Debate State
@@ -1293,69 +1324,75 @@ def analyze(
 
 
 def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:
-    """Render a WheelCandidateReport as a Rich panel.
-
-    Style: bold red when approved=False, default when approved=True.
-    Surfaces ADR-WHEEL-01 zero-variance flat-range note in iv_assessment
-    deterministically from the schema field — not relying on LLM faithfulness
-    (REQ-DATA-02 AC5, REQ-SCREEN-02, PM-F-05).
-    """
+    """Render a WheelCandidateReport as a structured Rich panel."""
     from tradingagents.agents.schemas import WheelCandidateReport
-
-    approved = None
-    panel_content = f"## WheelCandidateReport\n\n{report_raw}"
 
     try:
         report = WheelCandidateReport.model_validate_json(report_raw)
-        approved = report.approved
-
-        # Build a structured display from schema fields (deterministic — not dependent on LLM)
-        # TSPEC §7.1 template
-        approval_line = "Approved: Yes" if report.approved else "Approved: No"
-        rejection_line = (
-            f"\nRejection Reason: {report.rejection_reason}"
-            if report.rejection_reason
-            else ""
-        )
-        iv_note = ""
-
-        strike_range = (
-            f"[{report.recommended_strike_range[0]:.2f}, {report.recommended_strike_range[1]:.2f}]"
-            if len(report.recommended_strike_range) == 2
-            else "N/A"
-        )
-        dte_range = (
-            f"[{report.recommended_dte_range[0]}, {report.recommended_dte_range[1]}] calendar days"
-            if len(report.recommended_dte_range) == 2
-            else "N/A"
-        )
-        rationale_text = report.rationale[:300] + ("..." if len(report.rationale) > 300 else "")
-
-        panel_content = (
-            f"## WheelCandidateReport\n\n"
-            f"{approval_line}{rejection_line}\n"
-            f"IV Rank: {report.iv_rank:.1f}\n"
-            f"IV Percentile: {report.iv_percentile:.1f}\n"
-            f"IV Environment: {report.iv_environment}\n"
-            f"IV Assessment: {report.iv_assessment}{iv_note}\n"
-            f"Earnings Clearance: {'OK' if report.earnings_clearance_ok else 'FAIL'}\n"
-            f"Recommended Strike Range: {strike_range}\n"
-            f"Recommended DTE Range: {dte_range}\n"
-            f"Rationale: {rationale_text}"
-        )
     except Exception:
-        # Fall back to raw display if schema parsing fails
-        panel_content = f"## WheelCandidateReport\n\n{report_raw}"
+        console_obj.print(
+            Panel(Markdown(report_raw), title="Wheel Suitability", border_style="cyan", padding=(1, 2))
+        )
+        return
 
-    border_style = "bold red" if approved is False else "green"
+    approved = report.approved
+    border_style = "green" if approved else "bold red"
+    verdict = Text("✔  APPROVED" if approved else "✘  REJECTED", style="bold green" if approved else "bold red")
+
+    # --- metrics table ---
+    def check(val: bool) -> Text:
+        return Text("✔", style="green") if val else Text("✘", style="red")
+
+    iv_env_color = {"elevated": "yellow", "normal": "cyan", "compressed": "dim"}.get(report.iv_environment, "white")
+
+    metrics = Table(box=None, show_header=False, padding=(0, 2))
+    metrics.add_column("Label", style="bold", no_wrap=True)
+    metrics.add_column("Value")
+    metrics.add_column("Label", style="bold", no_wrap=True)
+    metrics.add_column("Value")
+
+    strike_range = (
+        f"${report.recommended_strike_range[0]:.2f} – ${report.recommended_strike_range[1]:.2f}"
+        if len(report.recommended_strike_range) == 2 else "N/A"
+    )
+    dte_range = (
+        f"{report.recommended_dte_range[0]}–{report.recommended_dte_range[1]} days"
+        if len(report.recommended_dte_range) == 2 else "N/A"
+    )
+    earnings_text = (
+        f"{'✔' if report.earnings_clearance_ok else '✘'}  {report.next_earnings_date or 'unknown'}"
+    )
+
+    metrics.add_row("IV Rank", f"{report.iv_rank:.1f}", "IV Percentile", f"{report.iv_percentile:.1f}")
+    metrics.add_row(
+        "IV Environment", Text(report.iv_environment.upper(), style=iv_env_color),
+        "Analyst Bias", Text(report.analyst_bias.upper(), style="green" if report.analyst_bias != "bearish" else "red"),
+    )
+    metrics.add_row(
+        "Liquidity", check(report.liquidity_ok),
+        "Earnings Clearance", Text(earnings_text, style="green" if report.earnings_clearance_ok else "red"),
+    )
+    metrics.add_row("Strike Range", strike_range, "DTE Window", dte_range)
+
+    # --- prose sections ---
+    content = Table.grid(padding=(0, 0))
+    content.add_column()
+    content.add_row(verdict)
+    content.add_row("")
+    content.add_row(metrics)
+    content.add_row("")
+    content.add_row(Text("IV Assessment", style="bold"))
+    content.add_row(Text(report.iv_assessment))
+    content.add_row("")
+    content.add_row(Text("Rationale", style="bold"))
+    content.add_row(Text(report.rationale))
+    if not approved and report.rejection_reason:
+        content.add_row("")
+        content.add_row(Text("Rejection Reason", style="bold red"))
+        content.add_row(Text(report.rejection_reason, style="red"))
 
     console_obj.print(
-        Panel(
-            Markdown(panel_content),
-            title="Wheel Suitability",
-            border_style=border_style,
-            padding=(1, 2),
-        )
+        Panel(content, title="[bold]Wheel Suitability[/bold]", border_style=border_style, padding=(1, 2))
     )
 
 

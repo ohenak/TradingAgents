@@ -19,6 +19,7 @@ ANALYST_ORDER = [
     ("Sentiment Analyst", AnalystType.SOCIAL),
     ("News Analyst", AnalystType.NEWS),
     ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
+    ("Wheel Analyst", AnalystType.WHEEL),
 ]
 
 CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
@@ -64,7 +65,7 @@ def filter_analysts_for_asset_type(
     return [
         analyst
         for analyst in analysts
-        if analyst != AnalystType.FUNDAMENTALS
+        if analyst not in (AnalystType.FUNDAMENTALS, AnalystType.WHEEL)
     ]
 
 
@@ -449,7 +450,7 @@ def confirm_ollama_endpoint(url: str) -> None:
 
     Surfaces three things the user benefits from seeing before model
     selection: which URL we'll actually hit, where it came from
-    (\`OLLAMA_BASE_URL\` vs default), and a soft warning if the URL is
+    (`OLLAMA_BASE_URL` vs default), and a soft warning if the URL is
     missing the scheme/port that ollama-serve expects. The warning is
     advisory only — we don't reject malformed input, since the user may
     be doing something deliberately unusual (e.g. a reverse-proxy path).
