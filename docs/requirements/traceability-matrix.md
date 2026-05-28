@@ -1,6 +1,6 @@
 # Requirements Traceability Matrix
 
-_Last updated: 2026-05-27 (added Feature: Multi-Ticker Sequential Analysis v0.1.0)_
+_Last updated: 2026-05-27 (added Feature: Portfolio Management v0.1.0)_
 
 ## Feature: Wheel Options Trading
 
@@ -41,6 +41,29 @@ _Last updated: 2026-05-27 (added Feature: Multi-Ticker Sequential Analysis v0.1.
 | US-06 | REQ-API-01 | `propagate_many` convenience method | — | 1 | P2 |
 | US-01 | REQ-NFR-01 | No regressions on single-ticker flow | — | 1 | P0 |
 | US-01, US-04 | REQ-NFR-02 | Progress indication between tickers | — | 1 | P1 |
+
+## Feature: Portfolio Management
+
+| User Story | Requirement ID | Requirement Title | FSPEC | Phase | Priority |
+|---|---|---|---|---|---|
+| US-01, US-08 | REQ-PORT-01 | Holdings data model | — | 1 | P0 |
+| US-01, US-04, US-08 | REQ-PORT-02 | CLI portfolio commands | — | 1 | P0 |
+| US-01, US-06 | REQ-PORT-03 | Auto-import of open wheel positions | — | 1 | P1 |
+| US-02 | REQ-BP-01 | Account capital declaration | — | 1 | P0 |
+| US-02 | REQ-BP-02 | Buying power calculation and display | — | 1 | P0 |
+| US-04 | REQ-ALLOC-01 | Current allocation tracking | — | 1 | P0 |
+| US-03 | REQ-ALLOC-02 | Target allocation per position | — | 1 | P1 |
+| US-03, US-04 | REQ-ALLOC-03 | Drift alerts | — | 1 | P1 |
+| US-05, US-07 | REQ-SCAN-01 | `portfolio scan` CLI command | — | 2 | P0 |
+| US-05, US-07 | REQ-SCAN-02 | Stock position routing | — | 2 | P0 |
+| US-06, US-07 | REQ-SCAN-03 | Wheel position routing | — | 2 | P0 |
+| US-05, US-07 | REQ-SCAN-04 | Manual options position routing | — | 2 | P1 |
+| US-07 | REQ-SCAN-05 | Post-scan summary table | — | 2 | P0 |
+| US-09 | REQ-PORT-API-01 | `Portfolio` Python class | — | 2 | P2 |
+| US-09 | REQ-PORT-API-02 | `scan_portfolio` convenience method | — | 2 | P2 |
+| US-08 | REQ-PORT-NFR-01 | Persistent JSON storage with atomic writes | — | 1 | P0 |
+| US-01 | REQ-PORT-NFR-02 | No regressions on existing CLI commands | — | 1 | P0 |
+| US-01, US-09 | REQ-PORT-NFR-03 | No broker API or real-time feed | — | 1 | P0 |
 
 ## Dependency Chain
 
