@@ -32,15 +32,15 @@ _Last updated: 2026-05-27 (added Feature: Portfolio Management v0.1.0)_
 
 | User Story | Requirement ID | Requirement Title | FSPEC | Phase | Priority |
 |---|---|---|---|---|---|
-| US-01 | REQ-BATCH-01 | Multi-ticker input at the CLI | — | 1 | P0 |
-| US-02 | REQ-BATCH-02 | Shared configuration across all tickers | — | 1 | P0 |
-| US-01, US-02 | REQ-BATCH-03 | Sequential execution | — | 1 | P0 |
-| US-04 | REQ-BATCH-04 | Error isolation | — | 1 | P1 |
-| US-05 | REQ-BATCH-05 | Per-ticker auto-save | — | 1 | P1 |
-| US-03 | REQ-BATCH-06 | Post-run summary table | — | 1 | P1 |
+| US-01 | REQ-BATCH-01 | Multi-ticker input at the CLI | FSPEC-BATCH-01 | 1 | P0 |
+| US-02 | REQ-BATCH-02 | Shared configuration across all tickers | FSPEC-BATCH-01 | 1 | P0 |
+| US-01, US-02 | REQ-BATCH-03 | Sequential execution | FSPEC-BATCH-02 | 1 | P0 |
+| US-04 | REQ-BATCH-04 | Error isolation | FSPEC-BATCH-02 | 1 | P1 |
+| US-05 | REQ-BATCH-05 | Per-ticker auto-save | FSPEC-BATCH-02 | 1 | P1 |
+| US-03 | REQ-BATCH-06 | Post-run summary table | FSPEC-BATCH-03 | 1 | P1 |
 | US-06 | REQ-API-01 | `propagate_many` convenience method | — | 1 | P2 |
 | US-01 | REQ-NFR-01 | No regressions on single-ticker flow | — | 1 | P0 |
-| US-01, US-04 | REQ-NFR-02 | Progress indication between tickers | — | 1 | P1 |
+| US-01, US-04 | REQ-NFR-02 | Progress indication between tickers | FSPEC-BATCH-02 | 1 | P1 |
 
 ## Feature: Portfolio Management
 
