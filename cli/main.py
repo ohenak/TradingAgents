@@ -486,8 +486,11 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def get_user_selections():
-    """Get all user selections before starting the analysis display."""
+def get_user_selections(pre_ticker: str = None):
+    """Get all user selections before starting the analysis display.
+
+    If pre_ticker is supplied, skip the interactive ticker prompt.
+    """
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
         welcome_ascii = f.read()
@@ -525,15 +528,18 @@ def get_user_selections():
             box_content += f"\n[dim]Default: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
-    # Step 1: Ticker symbol
-    console.print(
-        create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
-            "SPY",
+    # Step 1: Ticker symbol (skipped when pre_ticker is supplied by caller)
+    if pre_ticker is None:
+        console.print(
+            create_question_box(
+                "Step 1: Ticker Symbol",
+                "Enter ticker symbol(s) to analyze — comma-separated for batch mode (examples: SPY, CNC.TO, or AAPL,MSFT,NVDA)",
+                "SPY",
+            )
         )
-    )
-    selected_ticker = get_ticker()
+        selected_ticker = get_ticker()
+    else:
+        selected_ticker = pre_ticker
     asset_type = detect_asset_type(selected_ticker)
     console.print(
         f"[green]Detected asset type:[/green] {asset_type.value}"
@@ -1011,9 +1017,49 @@ def format_tool_args(args, max_length=80) -> str:
         return result[:max_length - 3] + "..."
     return result
 
-def run_analysis(checkpoint: bool = False):
-    # First get all user selections
-    selections = get_user_selections()
+def make_save_message_decorator(obj, func_name: str, log_file: Path):
+    """Module-level factory for the message-save decorator (used by run_analysis and batch_run_loop)."""
+    func = getattr(obj, func_name)
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        func(*args, **kwargs)
+        timestamp, message_type, content = obj.messages[-1]
+        content = content.replace("\n", " ")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{timestamp} [{message_type}] {content}\n")
+    return wrapper
+
+
+def make_save_tool_call_decorator(obj, func_name: str, log_file: Path):
+    func = getattr(obj, func_name)
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        func(*args, **kwargs)
+        timestamp, tool_name, args = obj.tool_calls[-1]
+        args_str = ", ".join(f"{k}={v}" for k, v in args.items())
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
+    return wrapper
+
+
+def make_save_report_section_decorator(obj, func_name: str, report_dir: Path):
+    func = getattr(obj, func_name)
+    @wraps(func)
+    def wrapper(section_name, content):
+        func(section_name, content)
+        if section_name in obj.report_sections and obj.report_sections[section_name] is not None:
+            content = obj.report_sections[section_name]
+            if content:
+                file_name = f"{section_name}.md"
+                text = "\n".join(str(item) for item in content) if isinstance(content, list) else content
+                with open(report_dir / file_name, "w", encoding="utf-8") as f:
+                    f.write(text)
+    return wrapper
+
+
+def run_analysis(ticker: str, checkpoint: bool = False):
+    # Get shared config (skips ticker prompt — ticker supplied by caller)
+    selections = get_user_selections(pre_ticker=ticker)
 
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
@@ -1067,52 +1113,16 @@ def run_analysis(checkpoint: bool = False):
     start_time = time.time()
 
     # Create result directory
-    results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
+    results_dir = Path(config["results_dir"]) / ticker / selections["analysis_date"]
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     log_file = results_dir / "message_tool.log"
     log_file.touch(exist_ok=True)
 
-    def save_message_decorator(obj, func_name):
-        func = getattr(obj, func_name)
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            func(*args, **kwargs)
-            timestamp, message_type, content = obj.messages[-1]
-            content = content.replace("\n", " ")  # Replace newlines with spaces
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp} [{message_type}] {content}\n")
-        return wrapper
-    
-    def save_tool_call_decorator(obj, func_name):
-        func = getattr(obj, func_name)
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            func(*args, **kwargs)
-            timestamp, tool_name, args = obj.tool_calls[-1]
-            args_str = ", ".join(f"{k}={v}" for k, v in args.items())
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
-        return wrapper
-
-    def save_report_section_decorator(obj, func_name):
-        func = getattr(obj, func_name)
-        @wraps(func)
-        def wrapper(section_name, content):
-            func(section_name, content)
-            if section_name in obj.report_sections and obj.report_sections[section_name] is not None:
-                content = obj.report_sections[section_name]
-                if content:
-                    file_name = f"{section_name}.md"
-                    text = "\n".join(str(item) for item in content) if isinstance(content, list) else content
-                    with open(report_dir / file_name, "w", encoding="utf-8") as f:
-                        f.write(text)
-        return wrapper
-
-    message_buffer.add_message = save_message_decorator(message_buffer, "add_message")
-    message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
-    message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
+    message_buffer.add_message = make_save_message_decorator(message_buffer, "add_message", log_file)
+    message_buffer.add_tool_call = make_save_tool_call_decorator(message_buffer, "add_tool_call", log_file)
+    message_buffer.update_report_section = make_save_report_section_decorator(message_buffer, "update_report_section", report_dir)
 
     # Now start the display layout
     layout = create_layout()
@@ -1122,7 +1132,7 @@ def run_analysis(checkpoint: bool = False):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Add initial messages
-        message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
+        message_buffer.add_message("System", f"Selected ticker: {ticker}")
         message_buffer.add_message("System", f"Detected asset type: {selections['asset_type']}")
         message_buffer.add_message(
             "System", f"Analysis date: {selections['analysis_date']}"
@@ -1141,13 +1151,13 @@ def run_analysis(checkpoint: bool = False):
 
         # Create spinner text
         spinner_text = (
-            f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
+            f"Analyzing {ticker} on {selections['analysis_date']}..."
         )
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
         # Initialize state and get graph args with callbacks
         init_agent_state = graph.propagator.create_initial_state(
-            selections["ticker"],
+            ticker,
             selections["analysis_date"],
             asset_type=selections["asset_type"],
         )
@@ -1303,14 +1313,14 @@ def run_analysis(checkpoint: bool = False):
     save_choice = typer.prompt("Save report?", default="Y").strip().upper()
     if save_choice in ("Y", "YES", ""):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
+        default_path = Path.cwd() / "reports" / f"{ticker}_{timestamp}"
         save_path_str = typer.prompt(
             "Save path (press Enter for default)",
             default=str(default_path)
         ).strip()
         save_path = Path(save_path_str)
         try:
-            report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
+            report_file = save_report_to_disk(final_state, ticker, save_path)
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
         except Exception as e:
@@ -1320,6 +1330,55 @@ def run_analysis(checkpoint: bool = False):
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
+
+
+def run_batch_analysis(ordered_tickers: list, checkpoint: bool = False) -> None:
+    """Run analysis for multiple tickers sequentially, then print summary table."""
+    from cli.batch import batch_run_loop, build_batch_summary
+
+    # Get shared config (pre_ticker=ordered_tickers[0] so we skip ticker prompt)
+    selections = get_user_selections(pre_ticker=ordered_tickers[0])
+
+    # Build config
+    config = DEFAULT_CONFIG.copy()
+    config["max_debate_rounds"] = selections["research_depth"]
+    config["max_risk_discuss_rounds"] = selections["research_depth"]
+    config["quick_think_llm"] = selections["shallow_thinker"]
+    config["deep_think_llm"] = selections["deep_thinker"]
+    config["backend_url"] = selections["backend_url"]
+    config["llm_provider"] = selections["llm_provider"].lower()
+    config["google_thinking_level"] = selections.get("google_thinking_level")
+    config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
+    config["anthropic_effort"] = selections.get("anthropic_effort")
+    config["output_language"] = selections.get("output_language", "English")
+    config["checkpoint_enabled"] = checkpoint
+
+    stats_handler = StatsCallbackHandler()
+    selected_set = {analyst.value for analyst in selections["analysts"]}
+    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+    pipeline_analyst_keys = [a for a in selected_analyst_keys if a in ANALYST_PIPELINE_KEYS]
+    if not pipeline_analyst_keys and "wheel" in selected_analyst_keys:
+        pipeline_analyst_keys = list(ANALYST_PIPELINE_KEYS)
+        selected_analyst_keys = pipeline_analyst_keys + ["wheel"]
+
+    graph = TradingAgentsGraph(
+        selected_analyst_keys,
+        config=config,
+        debug=False,
+        callbacks=[stats_handler],
+    )
+
+    selections["selected_analyst_keys"] = selected_analyst_keys
+    selections["pipeline_analyst_keys"] = pipeline_analyst_keys
+
+    batch_results, failed_tickers = batch_run_loop(
+        ordered_tickers, config, graph, selections, checkpoint
+    )
+    table, exit_code = build_batch_summary(
+        batch_results, failed_tickers, selected_analyst_keys, ordered_tickers
+    )
+    console.print(table)
+    raise SystemExit(exit_code)
 
 
 @app.command()
@@ -1334,12 +1393,35 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    tickers: Optional[str] = typer.Option(
+        None,
+        "--tickers",
+        help="Comma-separated list of ticker symbols to analyze sequentially. "
+             "Skips the interactive ticker prompt.",
+    ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint)
+
+    # Resolve ticker list from flag or interactive prompt
+    if tickers is not None:
+        ordered_tickers = parse_tickers_input(tickers)
+        if not ordered_tickers:
+            raise typer.BadParameter(
+                "Error: --tickers requires at least one valid ticker symbol.",
+                param_hint="'--tickers'",
+            )
+    else:
+        raw = get_ticker()
+        # get_ticker() already normalizes; use parse_tickers_input for CSV or wrap as single
+        ordered_tickers = parse_tickers_input(raw) if "," in raw else [raw]
+
+    if len(ordered_tickers) == 1:
+        run_analysis(ticker=ordered_tickers[0], checkpoint=checkpoint)
+    else:
+        run_batch_analysis(ordered_tickers, checkpoint=checkpoint)
 
 
 def render_wheel_candidate_panel(report_raw: str, console_obj: Console) -> None:

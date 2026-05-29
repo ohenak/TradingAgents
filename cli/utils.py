@@ -26,10 +26,10 @@ CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
 
 
 def get_ticker() -> str:
-    """Prompt the user to enter a ticker symbol."""
+    """Prompt the user to enter ticker symbol(s) — comma-separated for batch mode."""
     ticker = questionary.text(
-        f"Enter the exact ticker symbol to analyze ({TICKER_INPUT_EXAMPLES}):",
-        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol.",
+        f"Enter ticker symbol(s) to analyze — comma-separated for batch mode ({TICKER_INPUT_EXAMPLES}, or AAPL,MSFT,NVDA):",
+        validate=lambda x: len(x.strip()) > 0 or "Please enter a valid ticker symbol, e.g. AAPL, 000404.SZ, 0700.HK.",
         style=questionary.Style(
             [
                 ("text", "fg:green"),
