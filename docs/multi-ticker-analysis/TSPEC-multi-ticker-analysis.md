@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | SE-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-29 |
 | **Upstream** | REQ → FSPEC → **TSPEC** |
 | **Downstream** | DECISIONS, PLAN, PROPERTIES, IMPL |
-| **Cross-Reviews** | — |
+| **Cross-Reviews** | `CROSS-REVIEW-product-manager-TSPEC.md`, `CROSS-REVIEW-test-engineer-TSPEC.md` |
 | **LEARNINGS** | `docs/multi-ticker-analysis/LEARNINGS-multi-ticker-analysis.md` |
 
 ---
@@ -233,7 +233,8 @@ if tickers is not None:
             param_hint="'--tickers'",
         )
 else:
-    raw = get_ticker()           # existing interactive prompt
+    raw = get_ticker()           # existing interactive prompt; already calls normalize_ticker_symbol() internally
+    # If CSV, parse+normalize+dedup; if single, use as-is (already normalized by get_ticker)
     ordered_tickers = parse_tickers_input(raw) if "," in raw else [raw]
 
 # 2. Route single vs batch
@@ -244,6 +245,18 @@ else:
 ```
 
 **Note:** `typer.BadParameter` causes Typer to print the message and exit with code 2.
+
+#### `get_ticker()` prompt text update
+
+The `get_ticker()` function in `cli/utils.py` must update its prompt text from the current singular form to indicate multi-ticker CSV input is accepted:
+
+```python
+# Before: "Enter the exact ticker symbol to analyze ({TICKER_INPUT_EXAMPLES}):"
+# After:
+"Enter ticker symbol(s) to analyze — comma-separated for batch mode ({TICKER_INPUT_EXAMPLES}, or 'AAPL,MSFT,NVDA'):"
+```
+
+The existing validation (`len(x.strip()) > 0`) already accepts CSV input; only the user-facing text changes.
 
 #### `run_analysis()` refactoring
 
@@ -272,7 +285,7 @@ def batch_run_loop(
 
 **Per-ticker steps** (see FSPEC-BATCH-02 for full pseudocode):
 1. `console.print(f"[{i}/{N}] Analyzing {ticker} on {date}")`
-2. `asset_type = _detect_asset_type(ticker).value`  (convert to AssetType enum string)
+2. `asset_type = _detect_asset_type(ticker)`  # returns `"stock"` or `"crypto"` string; `propagate()` accepts strings directly
 3. Create `results_dir = Path(config["results_dir"]) / ticker / date`; `results_dir.mkdir(...)`
 4. `stats_handler = StatsCallbackHandler()`
 5. `message_buffer.reset()`
@@ -302,6 +315,8 @@ def build_batch_summary(
     Pure function — no I/O.
     """
 ```
+
+**Precondition:** Every ticker in `ordered_tickers` is in exactly one of `batch_results` or `failed_tickers`. This invariant is maintained by `batch_run_loop` — every ticker either succeeds into `batch_results` or fails into `failed_tickers`. `build_batch_summary` may raise `KeyError` if the invariant is violated; this is a programming error, not a user-facing error.
 
 **Algorithm:**
 1. `wheel_mode = "wheel" in selected_analyst_keys`
@@ -361,8 +376,16 @@ raise SystemExit(exit_code)
 | `graph.process_signal` | `MagicMock` with `side_effect` for exception injection | Per test |
 | `questionary` prompts | `CliRunner(input=...)` | CliRunner stdin |
 | `TradingAgentsGraph.__init__` | `MagicMock` via `mock_llm_client` fixture | Existing `conftest.py` pattern |
+| Rich `Live` context | `patch('cli.batch.Live', MagicMock())` — no-op context manager | All `batch_run_loop` tests |
 
 ### 7.3 Key test cases by file
+
+**`tests/test_detect_asset_type_internal.py`**
+- `_detect_asset_type("BTC-USD")` → `"crypto"`
+- `_detect_asset_type("ETH-USDT")` → `"crypto"`
+- `_detect_asset_type("AAPL")` → `"stock"`
+- `_detect_asset_type("CNC.TO")` → `"stock"` (exchange suffix, not a crypto suffix)
+- `_detect_asset_type("  btc-usd  ")` → `"crypto"` (strip+uppercase applied before suffix match)
 
 **`tests/test_parse_tickers_input.py`**
 - `""` → `[]`
@@ -388,6 +411,7 @@ raise SystemExit(exit_code)
 - `ordered_tickers` order preserved in table rows
 
 **`tests/test_propagate_many.py`**
+- `propagate_many([], date)` → returns `[]`; `propagate()` is never called
 - All succeed: returns `list[BatchTickerResult]` in input order; all `error=None`
 - One ticker raises `ValueError`: that result has `error=<ValueError>`, others succeed
 - `asset_types` length mismatch → `ValueError`
@@ -396,6 +420,8 @@ raise SystemExit(exit_code)
 - `KeyboardInterrupt` propagates (not caught)
 
 **`tests/test_batch_run_loop.py`**
+> Patch `cli.batch.Live` as a no-op context manager (`MagicMock()`) in all tests in this file to prevent Rich from attempting terminal writes in headless pytest.
+
 - AAPL succeeds, BADTICKER raises ValueError, NVDA succeeds: `failed_tickers == ["BADTICKER"]`, `batch_results` has AAPL and NVDA
 - `save_report_to_disk` raises `OSError` on ticker 2: ticker 2 in `failed_tickers`, ticker 3 still runs
 - All tickers fail: `batch_results == {}`, `failed_tickers == [all 3]`
@@ -410,7 +436,13 @@ raise SystemExit(exit_code)
 - `KeyboardInterrupt` propagates from loop: `pytest.raises(KeyboardInterrupt)` on loop function (not CliRunner)
 
 **`tests/test_regression_single_ticker.py`** (REQ-NFR-01)
-- With `propagate()` mocked, single-ticker via `CliRunner.invoke(app, ["analyze"], input=...)`: verify questionary prompt sequence, results path `results/AAPL/{DATE}/`, Rich panel titles — identical to pre-feature baseline asserted in same test
+This test is parametrized over a fixed analyst set `["market", "news"]` to make panel titles deterministic.
+
+Expected assertions (hardcoded baseline captured at feature authoring time):
+- **Questionary call sequence** (by `questionary.text`/`questionary.select`/`questionary.checkbox` call order): `["text", "select", "select", "select", "text", "checkbox", "select"]` — maps to (language, provider, deep-model, quick-model, date, analyst-selection, research-depth)
+- **Results path**: directory `results/AAPL/{DATE}/` exists where `{DATE}` is the mocked date string
+- **Rich panel titles rendered** (minimum set for `["market", "news"]` analyst set): `{"I. Analyst Team Reports", "II. Research Team Decision", "III. Trading Team Plan", "IV. Risk Management Team Decision", "V. Portfolio Manager Decision"}`
+- Assertion approach: capture CliRunner output, assert path exists via `tmp_path`, assert panel title strings present in output via `assert "I. Analyst Team Reports" in result.output`
 
 ---
 
