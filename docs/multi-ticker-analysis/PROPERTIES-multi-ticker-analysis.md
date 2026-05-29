@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | TE-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-29 |
 | **Upstream** | REQ → FSPEC → TSPEC → PLAN → **PROPERTIES** |
 | **Downstream** | IMPL tests |
-| **Cross-Reviews** | — |
+| **Cross-Reviews** | `CROSS-REVIEW-product-manager-PROPERTIES.md`, `CROSS-REVIEW-software-engineer-PROPERTIES.md` |
 | **LEARNINGS** | `docs/multi-ticker-analysis/LEARNINGS-multi-ticker-analysis.md` |
 
 Project-level constraints from DECISIONS-multi-ticker-analysis.md:
@@ -103,7 +103,7 @@ Project-level constraints from DECISIONS-multi-ticker-analysis.md:
 | PROP-LOOP-02 | When `save_report_to_disk()` raises `OSError` for one ticker, that ticker must appear in `failed_tickers` and the next ticker must proceed | Integration | REQ-BATCH-05 AC3; FSPEC-BATCH-02 |
 | PROP-LOOP-03 | When all tickers fail, `batch_results` must be empty and `failed_tickers` must contain all tickers | Integration | REQ-BATCH-04 AC4; FSPEC-BATCH-02 |
 | PROP-LOOP-04 | `propagate()` calls must appear in `call_args_list` in the exact order of `ordered_tickers` — strict sequential ordering | Integration | REQ-BATCH-03 AC1; FSPEC-BATCH-02 |
-| PROP-LOOP-05 | `message_buffer.reset()` must be called before each ticker's `propagate()` call | Integration | REQ-BATCH-05; FSPEC-BATCH-02 BR-04 |
+| PROP-LOOP-05 | `message_buffer.reset()` must be called before each ticker's `propagate()` call. Verified by patching `cli.batch.message_buffer` with a `MagicMock()` and asserting `mock_buffer.reset.call_count == len(ordered_tickers)` with each reset preceding its corresponding `propagate()` call | Integration | REQ-BATCH-05; FSPEC-BATCH-02 BR-04 |
 | PROP-LOOP-06 | `graph.process_signal()` raising `Exception` must not mark the ticker as failed — ticker must still appear in `batch_results` as Success | Integration | FSPEC-BATCH-02 Step 3a |
 | PROP-LOOP-07 | The progress header `[N/TOTAL] Analyzing TICKER on DATE` must appear in output before that ticker's analysis output | Integration | REQ-NFR-02 AC1; FSPEC-BATCH-02 BR-03 |
 
@@ -116,7 +116,7 @@ Project-level constraints from DECISIONS-multi-ticker-analysis.md:
 | PROP-CLI-01 | `tradingagents analyze --tickers AAPL,MSFT` must not display the interactive ticker prompt | Integration | REQ-BATCH-01 AC2; FSPEC-BATCH-01 BR-01 |
 | PROP-CLI-02 | `tradingagents analyze --tickers "   "` must exit with code 2 and print the usage error message | Integration | REQ-BATCH-01; FSPEC-BATCH-01 edge case |
 | PROP-CLI-03 | A single-ticker invocation (no comma, no `--tickers`) must route to the existing `run_analysis()` path | Integration | REQ-BATCH-01 AC3; FSPEC-BATCH-01 BR-04 |
-| PROP-CLI-04 | An interactive CSV input `"NVDA, AAPL, NVDA"` at the ticker prompt must result in a batch run for `["NVDA","AAPL"]` | Integration | REQ-BATCH-01 AC1, AC4 |
+| PROP-CLI-04 | An interactive CSV input `"NVDA, AAPL, NVDA"` at the ticker prompt must result in a batch run for `["NVDA","AAPL"]`. Verified by mocking `propagate()` and asserting `propagate.call_args_list == [call("NVDA", ...), call("AAPL", ...)]` | Integration | REQ-BATCH-01 AC1, AC4 |
 | PROP-CLI-05 | Config prompts (language, provider, model, date, analysts, depth) must appear exactly once for any batch size | Integration | REQ-BATCH-02 AC1, AC2 |
 
 ---
@@ -135,7 +135,7 @@ Project-level constraints from DECISIONS-multi-ticker-analysis.md:
 
 | ID | Property | Test Level | REQ / TSPEC ref |
 |---|---|---|---|
-| PROP-NEG-01 | `tradingagents` library modules must NOT import from `cli/` at any level | Unit (import check) | DEC-MULTI-01; REQ §3 Assumptions |
+| PROP-NEG-01 | `tradingagents` library modules must NOT import from `cli/` at any level. Verified by an `ast`-based static import scan on all `.py` files under `tradingagents/`: assert no `from cli` or `import cli` statement exists in any module | Unit (import check) | DEC-MULTI-01; REQ §3 Assumptions |
 | PROP-NEG-02 | `batch_run_loop` must NOT catch `KeyboardInterrupt` — it must propagate immediately | Integration | REQ-BATCH-04 AC5; FSPEC-BATCH-02 BR-01 |
 | PROP-NEG-03 | `propagate_many` must NOT catch `KeyboardInterrupt` — it must propagate immediately | Unit | REQ-API-01; TSPEC §5.2 |
 | PROP-NEG-04 | The summary table must NOT be printed for a single-ticker invocation | Integration | REQ-BATCH-06 AC3; FSPEC-BATCH-03 BR-01 |
