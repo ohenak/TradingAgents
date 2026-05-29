@@ -7,6 +7,9 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
 
+from tradingagents.dataflows.utils import _detect_asset_type
+from tradingagents.graph.batch import BatchTickerResult
+
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
@@ -357,6 +360,27 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+
+    def propagate_many(
+        self,
+        tickers: list,
+        date: str,
+        asset_types: Optional[list] = None,
+    ) -> list:
+        """Analyse a list of tickers sequentially and return one BatchTickerResult per ticker."""
+        if asset_types is not None and len(asset_types) != len(tickers):
+            raise ValueError(
+                f"asset_types length {len(asset_types)} != tickers length {len(tickers)}"
+            )
+        results: list[BatchTickerResult] = []
+        for i, ticker in enumerate(tickers):
+            asset_type = asset_types[i] if asset_types is not None else _detect_asset_type(ticker)
+            try:
+                state, decision = self.propagate(ticker, date, asset_type=asset_type)
+                results.append(BatchTickerResult(ticker=ticker, state=state, decision=decision, error=None))
+            except Exception as e:
+                results.append(BatchTickerResult(ticker=ticker, state=None, decision=None, error=e))
+        return results
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""

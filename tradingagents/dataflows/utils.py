@@ -7,6 +7,18 @@ from typing import Annotated
 
 SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
 
+# Library-internal asset type detection (DEC-MULTI-01: no import from cli/).
+# Kept in sync with cli/utils.py CRYPTO_SUFFIXES — see PROP-CONTRACT-01.
+CRYPTO_SUFFIXES: tuple[str, ...] = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
+
+
+def _detect_asset_type(ticker: str) -> str:
+    """Return 'crypto' if ticker ends with a known crypto suffix, else 'stock'."""
+    normalized = ticker.strip().upper()
+    if normalized.endswith(CRYPTO_SUFFIXES):
+        return "crypto"
+    return "stock"
+
 # Tickers can contain letters, digits, dot, dash, underscore, and caret
 # (for index symbols like ^GSPC). Anything else is rejected so the value
 # never escapes a containing directory when interpolated into a path.
