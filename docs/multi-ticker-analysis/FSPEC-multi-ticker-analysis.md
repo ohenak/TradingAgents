@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.4.0 |
+| **Version** | 0.5.0 |
 | **Created** | 2026-05-28 |
 | **Upstream** | REQ → **FSPEC** |
 | **Downstream** | TSPEC, PROPERTIES |
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.5.0 | 2026-05-29 | Final Low fix: N→len(ordered_tickers) gate checks in FSPEC-BATCH-03 (SE-F-01/TE-F-01 v4) |
 | 0.4.0 | 2026-05-29 | Address SE/TE v3: batch_results list→dict (SE-F-01); process_signal CONTINUE removed (SE-F-02); FSPEC-BATCH-03 INPUT ordered_tickers (SE-F-03); parse_tickers_input extractability note (TE-F-01) |
 | 0.3.0 | 2026-05-29 | Address SE/TE v2 cross-review: fix FSPEC-BATCH-03 loop to iterate ordered_tickers (SE-F-01); remove redundant Live exit from OSError handler (SE-F-02); process_signal() non-fatal handling (SE-F-03); BatchTickerRecord type note (SE-F-04); AT2 pytest.raises note (TE-F-01); AT1 observable assertion (TE-F-02); init_for_analysis method name (TE-F-03) |
 | 0.2.0 | 2026-05-29 | Address SE/TE v1 cross-review: suppress interactive prompts in batch mode (SE-F-01); Live context per ticker (SE-F-02); graph.process_signal() per ticker (SE-F-03); CliRunner test mechanism note (TE-F-01); message_buffer.reset() business rule (TE-F-02); batch_results structure note; AT wording precision; OQ-F-01 resolved to exit-with-error |
@@ -248,9 +249,9 @@ INPUT: ordered_tickers (list[str], original input order),
        batch_results (dict[str, BatchTickerRecord]), failed_tickers (list[str]),
        selected_analyst_keys (from config), wheel_mode = ("wheel" in selected_analyst_keys)
         │
-        ├── IF N == 1 (single-ticker path) → DO NOT PRINT TABLE → END
+        ├── IF len(ordered_tickers) == 1 (single-ticker path) → DO NOT PRINT TABLE → END
         │
-        └── IF N > 1 (batch path):
+        └── IF len(ordered_tickers) > 1 (batch path):
 
   Build table rows (one per ticker, in original input order):
 
