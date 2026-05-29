@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | SE-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-29 |
 | **Upstream** | REQ → FSPEC → TSPEC → DECISIONS → **PLAN** |
 | **Downstream** | PROPERTIES, IMPL |
@@ -73,12 +73,13 @@ Four phases ordered by dependency. Each phase opens with failing tests (🔴) be
 | 2.4 | Write failing tests for `MessageBuffer.reset()` (2 cases: post-patch reset, fresh-buffer no-op) | `tests/test_message_buffer_reset.py` | — | ⬚ |
 | 2.5 | Implement `MessageBuffer.reset()` in `cli/main.py` using `__dict__.pop` pattern | `tests/test_message_buffer_reset.py` | `cli/main.py` | ⬚ |
 | 2.6 | Refactor `MessageBuffer.reset()` | `tests/test_message_buffer_reset.py` | `cli/main.py` | ⬚ |
-| 2.7 | Implement `BatchTickerRecord` dataclass in `cli/batch.py` (no test — tested implicitly by Phase 3) | — | `cli/batch.py` | ⬚ |
-| 2.8 | Write failing tests for `build_batch_summary()` (10 cases: all-success-standard, one-failed, all-failed, all-success-exit-0, wheel-approved, wheel-rejected, wheel-None, wheel-malformed-JSON, standard-first-line-skip-blanks, 75-char-truncation, row-order-preserved) | `tests/test_build_batch_summary.py` | — | ⬚ |
-| 2.9 | Implement `build_batch_summary()` in `cli/batch.py` | `tests/test_build_batch_summary.py` | `cli/batch.py` | ⬚ |
-| 2.10 | Refactor `build_batch_summary()` | `tests/test_build_batch_summary.py` | `cli/batch.py` | ⬚ |
+| 2.7 | Write failing test for `BatchTickerRecord` field types (construct with ticker/final_state/decision; assert field access) | `tests/test_build_batch_summary.py` | — | ⬚ |
+| 2.8 | Implement `BatchTickerRecord` dataclass in `cli/batch.py` | `tests/test_build_batch_summary.py` | `cli/batch.py` | ⬚ |
+| 2.9 | Write failing tests for `build_batch_summary()` (11 cases: all-success-standard, one-failed, all-failed, all-success-exit-0, wheel-approved, wheel-rejected, wheel-None, wheel-malformed-JSON, standard-first-line-skip-blanks, 75-char-truncation, row-order-preserved) | `tests/test_build_batch_summary.py` | — | ⬚ |
+| 2.10 | Implement `build_batch_summary()` in `cli/batch.py` | `tests/test_build_batch_summary.py` | `cli/batch.py` | ⬚ |
+| 2.11 | Refactor `build_batch_summary()` | `tests/test_build_batch_summary.py` | `cli/batch.py` | ⬚ |
 
-**Phase 2 exit criteria:** All `tests/test_parse_tickers_input.py`, `tests/test_message_buffer_reset.py`, and `tests/test_build_batch_summary.py` tests green. No change to `run_analysis()` or `analyze` command.
+**Phase 2 exit criteria:** All `tests/test_parse_tickers_input.py`, `tests/test_message_buffer_reset.py`, and `tests/test_build_batch_summary.py` tests green (11 tasks). No change to `run_analysis()` or `analyze` command.
 
 ---
 
@@ -90,16 +91,15 @@ Four phases ordered by dependency. Each phase opens with failing tests (🔴) be
 
 | # | Task | Test File | Source File | Status |
 |---|---|---|---|---|
-| 3.1 | Write failing tests for `batch_run_loop()` (5 cases: partial-fail, OSError-save, all-fail, KI-propagation, process_signal-non-fatal) with `cli.batch.Live` patched as no-op | `tests/test_batch_run_loop.py` | — | ⬚ |
+| 3.1 | Write failing tests for `batch_run_loop()` (6 cases: partial-fail, OSError-save, all-fail, KI-propagation, process_signal-non-fatal, progress-header `[N/TOTAL] Analyzing TICKER on DATE` for REQ-NFR-02) with `cli.batch.Live` patched as no-op | `tests/test_batch_run_loop.py` | — | ⬚ |
 | 3.2 | Refactor `run_analysis()` in `cli/main.py` to accept `ticker: str` parameter; move `get_ticker()` call to `analyze` dispatcher | `tests/test_batch_run_loop.py` | `cli/main.py` | ⬚ |
 | 3.3 | Extract `_stream_analysis()` helper from `run_analysis()` for reuse by both single-ticker and batch paths | `tests/test_batch_run_loop.py` | `cli/main.py` | ⬚ |
 | 3.4 | Implement `batch_run_loop()` in `cli/batch.py` | `tests/test_batch_run_loop.py` | `cli/batch.py` | ⬚ |
 | 3.5 | Refactor `batch_run_loop()` | `tests/test_batch_run_loop.py` | `cli/batch.py` | ⬚ |
-| 3.6 | Update `get_ticker()` prompt text in `cli/utils.py` to indicate CSV input (PM-F-01) | `tests/test_analyze_command_batch.py` | `cli/utils.py` | ⬚ |
-| 3.7 | Write failing tests for `analyze` command: `--tickers` flag, blank-flag exit-2, single-ticker routing, interactive CSV routing, KI propagation | `tests/test_analyze_command_batch.py` | — | ⬚ |
-| 3.8 | Add `--tickers` option to `analyze` command; implement single-vs-batch dispatch in `cli/main.py` | `tests/test_analyze_command_batch.py` | `cli/main.py` | ⬚ |
-| 3.9 | Implement `run_batch_analysis()` orchestrator in `cli/main.py` (calls `batch_run_loop`, `build_batch_summary`, `raise SystemExit`) | `tests/test_analyze_command_batch.py` | `cli/main.py` | ⬚ |
-| 3.10 | Refactor Phase 3 changes | `tests/test_analyze_command_batch.py` | `cli/main.py`, `cli/batch.py` | ⬚ |
+| 3.6 | Write failing tests for `analyze` command: `--tickers` flag, blank-flag exit-2, single-ticker routing, interactive CSV routing, KI propagation, new prompt-text assertion | `tests/test_analyze_command_batch.py` | — | ⬚ |
+| 3.7 | Update `get_ticker()` prompt text in `cli/utils.py` to indicate CSV input; add `--tickers` option to `analyze` command; implement single-vs-batch dispatch | `tests/test_analyze_command_batch.py` | `cli/utils.py`, `cli/main.py` | ⬚ |
+| 3.8 | Implement `run_batch_analysis()` orchestrator in `cli/main.py` (calls `batch_run_loop`, `build_batch_summary`, `raise SystemExit`) | `tests/test_analyze_command_batch.py` | `cli/main.py` | ⬚ |
+| 3.9 | Refactor Phase 3 changes | `tests/test_analyze_command_batch.py` | `cli/main.py`, `cli/batch.py` | ⬚ |
 
 **Phase 3 exit criteria:** All `tests/test_batch_run_loop.py` and `tests/test_analyze_command_batch.py` tests green. Full test suite passes (no regressions).
 
