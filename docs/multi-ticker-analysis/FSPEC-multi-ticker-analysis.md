@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.2.0 |
+| **Version** | 0.3.0 |
 | **Created** | 2026-05-28 |
 | **Upstream** | REQ → **FSPEC** |
 | **Downstream** | TSPEC, PROPERTIES |
-| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-FSPEC.md`, `CROSS-REVIEW-test-engineer-FSPEC.md` |
+| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-FSPEC.md`, `CROSS-REVIEW-test-engineer-FSPEC.md`, `CROSS-REVIEW-software-engineer-FSPEC-v2.md`, `CROSS-REVIEW-test-engineer-FSPEC-v2.md` |
 | **LEARNINGS** | `docs/multi-ticker-analysis/LEARNINGS-multi-ticker-analysis.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.3.0 | 2026-05-29 | Address SE/TE v2 cross-review: fix FSPEC-BATCH-03 loop to iterate ordered_tickers (SE-F-01); remove redundant Live exit from OSError handler (SE-F-02); process_signal() non-fatal handling (SE-F-03); BatchTickerRecord type note (SE-F-04); AT2 pytest.raises note (TE-F-01); AT1 observable assertion (TE-F-02); init_for_analysis method name (TE-F-03) |
 | 0.2.0 | 2026-05-29 | Address SE/TE v1 cross-review: suppress interactive prompts in batch mode (SE-F-01); Live context per ticker (SE-F-02); graph.process_signal() per ticker (SE-F-03); CliRunner test mechanism note (TE-F-01); message_buffer.reset() business rule (TE-F-02); batch_results structure note; AT wording precision; OQ-F-01 resolved to exit-with-error |
 | 0.1.0 | 2026-05-28 | Initial draft |
 
@@ -112,7 +113,7 @@ Step 2: Shared Configuration Prompts
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AT1 | Trader | `tradingagents analyze --tickers AAPL,MSFT` | command starts | ticker prompt is not shown; `ordered_tickers == ["AAPL", "MSFT"]`; config prompts appear once |
+| AT1 | Trader | `tradingagents analyze --tickers AAPL,MSFT` with `propagate()` mocked | command starts | ticker prompt is not shown; `propagate()` is called exactly twice, first for AAPL then for MSFT (verified by mock call list); config prompts appear exactly once |
 | AT2 | Trader | interactive prompt receives ` nvda , AAPL , nvda ` | user submits | `ordered_tickers == ["NVDA", "AAPL"]` (normalised, deduped first-occurrence) |
 | AT3 | Trader | single ticker `AAPL` entered (no comma) | command proceeds | no batch loop; behaviour identical to pre-feature single-ticker flow |
 | AT4 | Trader | `tradingagents analyze --tickers AAPL` | command starts | single-token result after dedup → single-ticker path activated |
@@ -130,7 +131,9 @@ Step 2: Shared Configuration Prompts
 ```
 INPUT: ordered_tickers (N ≥ 2), config, graph (TradingAgentsGraph instance)
        batch_results = []   ← list of BatchTickerRecord(ticker, final_state, decision)
-       failed_tickers = []
+                               BatchTickerRecord is an internal CLI-layer type distinct from
+                               BatchTickerResult (REQ-API-01, the public propagate_many return type)
+       failed_tickers = []  ← list of ticker strings that failed (analysis or save)
         │
         ▼
 FOR EACH ticker at index i (1-based) in ordered_tickers:
@@ -144,7 +147,7 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
     Create results directory: results/{TICKER}/{DATE}/
     message_buffer.reset()  ← clears all state from previous ticker
     Re-bind message_buffer decorators to this ticker's log_file and report_dir
-    Re-initialise message_buffer for this ticker's analyst selection
+    Call message_buffer.init_for_analysis(selected_analyst_keys)
     ↓
   Step 3: Execute Analysis
     Enter Rich Live context for this ticker (layout created fresh)
@@ -153,7 +156,11 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
       Exit Rich Live context
       ↓
       Step 3a: Persist to Memory Log
-        graph.process_signal(decision)
+        TRY:
+          graph.process_signal(decision)
+        EXCEPT Exception:
+          log warning: "process_signal failed for {ticker} — memory log may be incomplete"
+          CONTINUE (ticker remains as Success; do not append to failed_tickers)
       ↓
       Step 3b: Print Condensed Completion
         Print: "✓ {ticker} complete"
@@ -163,7 +170,6 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
           save_report_to_disk(final_state, ticker, results_dir)
           append BatchTickerRecord(ticker, final_state, decision) to batch_results
         EXCEPT OSError:
-          Exit Rich Live context (if not already exited)
           print: "[FAILED] {ticker}: OSError"
           append ticker to failed_tickers
           CONTINUE to next ticker
@@ -219,7 +225,7 @@ END FOR
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
 | AT1 | Trader | batch `["AAPL", "BADTICKER", "NVDA"]`; `graph.propagate` mocked to raise `ValueError` when called with "BADTICKER", succeed for others | loop executes | `[FAILED] BADTICKER: ValueError` printed; `propagate("NVDA")` subsequently called; NVDA succeeds |
-| AT2 | Trader | `propagate("AAPL")` raises `KeyboardInterrupt` | exception raised | no `[FAILED]` line printed; loop does not catch; batch aborts |
+| AT2 | Trader | `propagate("AAPL")` raises `KeyboardInterrupt` | exception raised | no `[FAILED]` line printed; loop does not catch; batch aborts — verified via `pytest.raises(KeyboardInterrupt)` on the batch loop function directly, not via CliRunner |
 | AT3 | Trader | batch of 3; `save_report_to_disk` mocked with `side_effect` to raise `OSError` on the second call | save fails for ticker 2 | `[FAILED] TICKER2: OSError` printed; ticker 3 analysis proceeds; `results/TICKER2/` may be partially populated |
 | AT4 | Trader | batch of 5 tickers; third begins | progress header printed | output contains `[3/5] Analyzing {TICKER} on {DATE}` matching `\[\d+/\d+\] Analyzing \S+ on \d{4}-\d{2}-\d{2}` |
 | AT5 | Trader | all 3 tickers fail | batch completes | summary table printed with 3 `Failed` rows; exit code 1 |
@@ -244,12 +250,14 @@ INPUT: N (total tickers), batch_results list, failed_tickers list,
 
   Build table rows (one per ticker, in original input order):
 
-  FOR EACH ticker result in batch_results:
+  FOR EACH ticker in ordered_tickers:   ← iterate original input list, not batch_results
 
     ├── IF ticker in failed_tickers:
     │     row = {Ticker: ticker, Decision: "", Status: "Failed"}
     │
-    └── IF ticker succeeded:
+    └── ELSE (ticker succeeded — look up its BatchTickerRecord from batch_results by ticker name):
+          final_state = batch_results[ticker].final_state
+          decision    = batch_results[ticker].decision
           ├── IF wheel_mode == True:
           │     TRY:
           │       report_raw = final_state.get("wheel_candidate_report")
