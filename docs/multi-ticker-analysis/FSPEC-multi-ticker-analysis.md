@@ -4,11 +4,11 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Created** | 2026-05-28 |
 | **Upstream** | REQ → **FSPEC** |
 | **Downstream** | TSPEC, PROPERTIES |
-| **Cross-Reviews** | — |
+| **Cross-Reviews** | `CROSS-REVIEW-software-engineer-FSPEC.md`, `CROSS-REVIEW-test-engineer-FSPEC.md` |
 | **LEARNINGS** | `docs/multi-ticker-analysis/LEARNINGS-multi-ticker-analysis.md` |
 
 ---
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.2.0 | 2026-05-29 | Address SE/TE v1 cross-review: suppress interactive prompts in batch mode (SE-F-01); Live context per ticker (SE-F-02); graph.process_signal() per ticker (SE-F-03); CliRunner test mechanism note (TE-F-01); message_buffer.reset() business rule (TE-F-02); batch_results structure note; AT wording precision; OQ-F-01 resolved to exit-with-error |
 | 0.1.0 | 2026-05-28 | Initial draft |
 
 ---
@@ -40,6 +41,8 @@ Not FSPECed (sufficient REQ detail, no multi-step branching for PM to resolve):
 ## FSPEC-BATCH-01 — Batch Input and Shared Configuration Setup
 
 **Linked requirements:** REQ-BATCH-01, REQ-BATCH-02
+
+> **Test mechanism note:** Interactive prompt inputs are simulated in tests using `CliRunner.invoke(app, args, input=...)` — the CliRunner input string feeds the questionary prompts with pre-set answers in sequence. Tests do NOT mock questionary directly.
 
 ### Behavioral Flow
 
@@ -100,7 +103,7 @@ Step 2: Shared Configuration Prompts
 
 | Scenario | Behaviour |
 |---|---|
-| `--tickers` value is all-blank (e.g. `--tickers "  "`) | After normalisation, zero tokens remain → treat as empty input → show validation error, prompt interactively OR exit with usage error. Engineers must decide which; flag for TSPEC. |
+| `--tickers` value is all-blank (e.g. `--tickers "  "`) | After normalisation, zero tokens remain → exit immediately with a usage error message: "Error: --tickers requires at least one valid ticker symbol." (exit code 2). The interactive prompt is NOT shown. |
 | `--tickers` produces a single unique ticker after dedup | Route to single-ticker path (BR-04) |
 | Batch contains both stock and crypto (e.g. `AAPL,BTC-USD`) | Accept cross-type batches; asset type is NOT detected at this step — it is detected per ticker inside the loop (FSPEC-BATCH-02) |
 | User selects "Wheel Analyst" without any standard analysts | Apply the existing auto-fallback (all four standard analysts added with a warning); this behaviour is unchanged |
@@ -114,12 +117,7 @@ Step 2: Shared Configuration Prompts
 | AT3 | Trader | single ticker `AAPL` entered (no comma) | command proceeds | no batch loop; behaviour identical to pre-feature single-ticker flow |
 | AT4 | Trader | `tradingagents analyze --tickers AAPL` | command starts | single-token result after dedup → single-ticker path activated |
 | AT5 | Trader | `tradingagents analyze` and user submits blank | prompt displayed | validation error shown; prompt re-displayed without advancing |
-
-### Open Questions
-
-| # | Question |
-|---|---|
-| OQ-F-01 | What is the exact behaviour when `--tickers "  "` (all-blank flag value) is provided? Options: (a) show interactive prompt, (b) exit with a usage error message. |
+| AT6 | Trader | `tradingagents analyze --tickers "   "` (all-blank value) | command starts | exits with exit code 2 and prints "Error: --tickers requires at least one valid ticker symbol."; interactive prompt is not shown |
 
 ---
 
@@ -131,6 +129,7 @@ Step 2: Shared Configuration Prompts
 
 ```
 INPUT: ordered_tickers (N ≥ 2), config, graph (TradingAgentsGraph instance)
+       batch_results = []   ← list of BatchTickerRecord(ticker, final_state, decision)
        failed_tickers = []
         │
         ▼
@@ -143,32 +142,43 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
     Detect asset_type = library_internal_detect(ticker)
     Create fresh StatsCallbackHandler for this ticker
     Create results directory: results/{TICKER}/{DATE}/
+    message_buffer.reset()  ← clears all state from previous ticker
     Re-bind message_buffer decorators to this ticker's log_file and report_dir
-    Clear message_buffer._processed_message_ids and all per-analysis state
+    Re-initialise message_buffer for this ticker's analyst selection
     ↓
   Step 3: Execute Analysis
+    Enter Rich Live context for this ticker (layout created fresh)
     TRY:
       final_state, decision = graph.propagate(ticker, date, asset_type=asset_type)
+      Exit Rich Live context
       ↓
-      Step 4: Save Report (inside try block)
+      Step 3a: Persist to Memory Log
+        graph.process_signal(decision)
+      ↓
+      Step 3b: Print Condensed Completion
+        Print: "✓ {ticker} complete"
+      ↓
+      Step 4: Auto-Save Report
         TRY:
           save_report_to_disk(final_state, ticker, results_dir)
-          record (ticker, final_state, decision) as SUCCESS
+          append BatchTickerRecord(ticker, final_state, decision) to batch_results
         EXCEPT OSError:
+          Exit Rich Live context (if not already exited)
           print: "[FAILED] {ticker}: OSError"
-          record ticker as FAILED
           append ticker to failed_tickers
           CONTINUE to next ticker
     ↓
     EXCEPT KeyboardInterrupt:
-      DO NOT CATCH → propagate immediately (batch aborts, no [FAILED] printed)
+      Exit Rich Live context (if active)
+      DO NOT CATCH further → propagate immediately (batch aborts, no [FAILED] printed)
     ↓
     EXCEPT SystemExit:
-      DO NOT CATCH → propagate immediately
+      Exit Rich Live context (if active)
+      DO NOT CATCH further → propagate immediately
     ↓
     EXCEPT Exception as e:
+      Exit Rich Live context (if active)
       print: "[FAILED] {ticker}: {type(e).__name__}"
-      record ticker as FAILED
       append ticker to failed_tickers
       CONTINUE to next ticker  ← loop continues with next ticker
 
@@ -179,6 +189,8 @@ END FOR
 → Exit code: 0 if failed_tickers is empty, else 1
 ```
 
+> **Suppressed interactive prompts in batch mode:** The single-ticker flow shows (a) "Save report? (Y/n)" and (b) "Display full report on screen? (Y/n)" after each analysis. Both are suppressed in batch mode. Auto-save always occurs without user confirmation. Full report display is replaced by the condensed completion line "✓ {ticker} complete". The full per-ticker panels are not shown during batch runs.
+
 ### Business Rules
 
 | ID | Rule |
@@ -186,9 +198,11 @@ END FOR
 | BR-01 | Only `Exception` subclasses are caught per ticker; `KeyboardInterrupt` and `SystemExit` always propagate |
 | BR-02 | Save failure (`OSError`) is treated identically to analysis failure: ticker is marked FAILED, `[FAILED]` line is printed, loop continues |
 | BR-03 | Progress header `[N/TOTAL] Analyzing TICKER on DATE` is printed **before** any analysis output for that ticker |
-| BR-04 | `message_buffer` must be fully reset per ticker: decorators rebound to the new ticker's paths, `_processed_message_ids` cleared, per-analysis state cleared |
+| BR-04 | `message_buffer` must be fully reset per ticker via `message_buffer.reset()`: this clears messages, tool_calls, _processed_message_ids, agent_status, report_sections, and removes monkey-patched decorator bindings. Tests invoke `reset()` before each test case for isolation. |
 | BR-05 | A new `StatsCallbackHandler` is created per ticker; stats are displayed at the end of each individual ticker's analysis, not accumulated |
 | BR-06 | Library-internal asset type detection (`_detect_asset_type(ticker)` in `tradingagents/`) is called per ticker in the loop; CLI layer's `detect_asset_type()` is **not** called here |
+| BR-07 | The two interactive post-analysis prompts ("Save report?" and "Display full report?") are **suppressed** in batch mode. Auto-save always occurs; display is replaced by the condensed "✓ {ticker} complete" line. |
+| BR-08 | A fresh Rich `Live` context (with a freshly created layout) is entered at the start of each ticker's streaming analysis and exited before advancing to the next ticker. Live context must not span multiple tickers. |
 
 ### Edge Cases
 
@@ -204,9 +218,9 @@ END FOR
 
 | # | Who | Given | When | Then |
 |---|---|---|---|---|
-| AT1 | Trader | batch `["AAPL", "BADTICKER", "NVDA"]`; `propagate("BADTICKER")` raises `ValueError` | loop executes | `[FAILED] BADTICKER: ValueError` printed; `propagate("NVDA")` subsequently called; NVDA succeeds |
+| AT1 | Trader | batch `["AAPL", "BADTICKER", "NVDA"]`; `graph.propagate` mocked to raise `ValueError` when called with "BADTICKER", succeed for others | loop executes | `[FAILED] BADTICKER: ValueError` printed; `propagate("NVDA")` subsequently called; NVDA succeeds |
 | AT2 | Trader | `propagate("AAPL")` raises `KeyboardInterrupt` | exception raised | no `[FAILED]` line printed; loop does not catch; batch aborts |
-| AT3 | Trader | batch of 3; `save_report_to_disk()` raises `OSError` on ticker 2 | save fails | `[FAILED] TICKER2: OSError` printed; ticker 3 analysis proceeds; `results/TICKER2/` may or may not exist |
+| AT3 | Trader | batch of 3; `save_report_to_disk` mocked with `side_effect` to raise `OSError` on the second call | save fails for ticker 2 | `[FAILED] TICKER2: OSError` printed; ticker 3 analysis proceeds; `results/TICKER2/` may be partially populated |
 | AT4 | Trader | batch of 5 tickers; third begins | progress header printed | output contains `[3/5] Analyzing {TICKER} on {DATE}` matching `\[\d+/\d+\] Analyzing \S+ on \d{4}-\d{2}-\d{2}` |
 | AT5 | Trader | all 3 tickers fail | batch completes | summary table printed with 3 `Failed` rows; exit code 1 |
 
@@ -215,6 +229,8 @@ END FOR
 ## FSPEC-BATCH-03 — Post-Run Summary Table Decision Logic
 
 **Linked requirements:** REQ-BATCH-06
+
+> **Extractability requirement:** The decision logic in this FSPEC (BR-01 through BR-08) must be implemented as a standalone, pure function — e.g. `build_batch_summary(batch_results, failed_tickers, selected_analyst_keys, n_total)` — so it can be unit tested independently without invoking the CLI, Live context, or `propagate()`.
 
 ### Behavioral Flow
 
