@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | SE-Author (Claude Code) |
-| **Version** | 0.2.0 |
+| **Version** | 0.3.0 |
 | **Created** | 2026-05-29 |
 | **Upstream** | REQ → FSPEC → **TSPEC** |
 | **Downstream** | DECISIONS, PLAN, PROPERTIES, IMPL |
@@ -417,6 +417,7 @@ raise SystemExit(exit_code)
 - `asset_types` length mismatch → `ValueError`
 - `asset_types=None`: `_detect_asset_type` called per ticker
 - `asset_types=["crypto"]`: explicit type passed to `propagate()`; detection bypassed
+- `propagate_many(["AAPL","BTC-USD"], date, asset_types=["stock","crypto"])`: `propagate("AAPL", date, asset_type="stock")` and `propagate("BTC-USD", date, asset_type="crypto")` — verified by `mock.call_args_list`
 - `KeyboardInterrupt` propagates (not caught)
 
 **`tests/test_batch_run_loop.py`**
@@ -439,7 +440,7 @@ raise SystemExit(exit_code)
 This test is parametrized over a fixed analyst set `["market", "news"]` to make panel titles deterministic.
 
 Expected assertions (hardcoded baseline captured at feature authoring time):
-- **Questionary call sequence** (by `questionary.text`/`questionary.select`/`questionary.checkbox` call order): `["text", "select", "select", "select", "text", "checkbox", "select"]` — maps to (language, provider, deep-model, quick-model, date, analyst-selection, research-depth)
+- **Questionary call sequence** (by `questionary.text`/`questionary.select`/`questionary.checkbox` call order): `["text", "select", "select", "select", "select", "text", "checkbox", "select"]` — maps to (ticker, language, provider, deep-model, quick-model, date, analyst-selection, research-depth)
 - **Results path**: directory `results/AAPL/{DATE}/` exists where `{DATE}` is the mocked date string
 - **Rich panel titles rendered** (minimum set for `["market", "news"]` analyst set): `{"I. Analyst Team Reports", "II. Research Team Decision", "III. Trading Team Plan", "IV. Risk Management Team Decision", "V. Portfolio Manager Decision"}`
 - Assertion approach: capture CliRunner output, assert path exists via `tmp_path`, assert panel title strings present in output via `assert "I. Analyst Team Reports" in result.output`
