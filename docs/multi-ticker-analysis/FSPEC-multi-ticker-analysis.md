@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Draft |
 | **Author** | PM-Author (Claude Code) |
-| **Version** | 0.3.0 |
+| **Version** | 0.4.0 |
 | **Created** | 2026-05-28 |
 | **Upstream** | REQ → **FSPEC** |
 | **Downstream** | TSPEC, PROPERTIES |
@@ -17,6 +17,7 @@
 
 | Version | Date | Changes |
 |---|---|---|
+| 0.4.0 | 2026-05-29 | Address SE/TE v3: batch_results list→dict (SE-F-01); process_signal CONTINUE removed (SE-F-02); FSPEC-BATCH-03 INPUT ordered_tickers (SE-F-03); parse_tickers_input extractability note (TE-F-01) |
 | 0.3.0 | 2026-05-29 | Address SE/TE v2 cross-review: fix FSPEC-BATCH-03 loop to iterate ordered_tickers (SE-F-01); remove redundant Live exit from OSError handler (SE-F-02); process_signal() non-fatal handling (SE-F-03); BatchTickerRecord type note (SE-F-04); AT2 pytest.raises note (TE-F-01); AT1 observable assertion (TE-F-02); init_for_analysis method name (TE-F-03) |
 | 0.2.0 | 2026-05-29 | Address SE/TE v1 cross-review: suppress interactive prompts in batch mode (SE-F-01); Live context per ticker (SE-F-02); graph.process_signal() per ticker (SE-F-03); CliRunner test mechanism note (TE-F-01); message_buffer.reset() business rule (TE-F-02); batch_results structure note; AT wording precision; OQ-F-01 resolved to exit-with-error |
 | 0.1.0 | 2026-05-28 | Initial draft |
@@ -44,6 +45,8 @@ Not FSPECed (sufficient REQ detail, no multi-step branching for PM to resolve):
 **Linked requirements:** REQ-BATCH-01, REQ-BATCH-02
 
 > **Test mechanism note:** Interactive prompt inputs are simulated in tests using `CliRunner.invoke(app, args, input=...)` — the CliRunner input string feeds the questionary prompts with pre-set answers in sequence. Tests do NOT mock questionary directly.
+
+> **Extractability note:** The normalisation and deduplication logic (split on comma → `normalize_ticker_symbol()` per token → first-occurrence dedup) must be implemented as a standalone pure function — e.g. `parse_tickers_input(csv_string) → list[str]` — so AT2 can be implemented as a unit test calling that function directly without CLI invocation.
 
 ### Behavioral Flow
 
@@ -130,7 +133,7 @@ Step 2: Shared Configuration Prompts
 
 ```
 INPUT: ordered_tickers (N ≥ 2), config, graph (TradingAgentsGraph instance)
-       batch_results = []   ← list of BatchTickerRecord(ticker, final_state, decision)
+       batch_results = {}   ← dict[str, BatchTickerRecord] keyed by ticker string
                                BatchTickerRecord is an internal CLI-layer type distinct from
                                BatchTickerResult (REQ-API-01, the public propagate_many return type)
        failed_tickers = []  ← list of ticker strings that failed (analysis or save)
@@ -160,7 +163,7 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
           graph.process_signal(decision)
         EXCEPT Exception:
           log warning: "process_signal failed for {ticker} — memory log may be incomplete"
-          CONTINUE (ticker remains as Success; do not append to failed_tickers)
+        (execution continues to Step 3b regardless — ticker remains as Success)
       ↓
       Step 3b: Print Condensed Completion
         Print: "✓ {ticker} complete"
@@ -168,7 +171,7 @@ FOR EACH ticker at index i (1-based) in ordered_tickers:
       Step 4: Auto-Save Report
         TRY:
           save_report_to_disk(final_state, ticker, results_dir)
-          append BatchTickerRecord(ticker, final_state, decision) to batch_results
+          batch_results[ticker] = BatchTickerRecord(ticker, final_state, decision)
         EXCEPT OSError:
           print: "[FAILED] {ticker}: OSError"
           append ticker to failed_tickers
@@ -236,12 +239,13 @@ END FOR
 
 **Linked requirements:** REQ-BATCH-06
 
-> **Extractability requirement:** The decision logic in this FSPEC (BR-01 through BR-08) must be implemented as a standalone, pure function — e.g. `build_batch_summary(batch_results, failed_tickers, selected_analyst_keys, n_total)` — so it can be unit tested independently without invoking the CLI, Live context, or `propagate()`.
+> **Extractability requirement:** The decision logic in this FSPEC (BR-01 through BR-08) must be implemented as a standalone, pure function — e.g. `build_batch_summary(batch_results, failed_tickers, selected_analyst_keys, ordered_tickers)` — so it can be unit tested independently without invoking the CLI, Live context, or `propagate()`.
 
 ### Behavioral Flow
 
 ```
-INPUT: N (total tickers), batch_results list, failed_tickers list,
+INPUT: ordered_tickers (list[str], original input order),
+       batch_results (dict[str, BatchTickerRecord]), failed_tickers (list[str]),
        selected_analyst_keys (from config), wheel_mode = ("wheel" in selected_analyst_keys)
         │
         ├── IF N == 1 (single-ticker path) → DO NOT PRINT TABLE → END
