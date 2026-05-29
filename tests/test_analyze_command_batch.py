@@ -77,6 +77,21 @@ class TestAnalyzeInteractiveCsv:
             assert "AAPL" in tickers
 
 
+class TestBatchModeSuppressesPrompts:
+    """PROP-NEG-05: Save/Display interactive prompts must NOT appear in batch mode."""
+
+    def test_batch_mode_never_calls_typer_prompt(self):
+        from cli.main import app
+        with patch("cli.main.get_user_selections", return_value=_dummy_selections()), \
+             patch("cli.main.TradingAgentsGraph"), \
+             patch("cli.batch.batch_run_loop", return_value=({}, [])), \
+             patch("cli.batch.build_batch_summary", return_value=(MagicMock(), 0)), \
+             patch("cli.main.typer.prompt") as mock_prompt:
+            runner.invoke(app, ["analyze", "--tickers", "AAPL,MSFT"])
+        assert mock_prompt.call_count == 0, \
+            "Batch mode must not show interactive Save/Display prompts (PROP-NEG-05)"
+
+
 class TestPromptTextUpdated:
     def test_get_ticker_prompt_mentions_batch(self):
         """get_ticker() prompt text should mention comma-separated / batch."""

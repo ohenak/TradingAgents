@@ -78,6 +78,19 @@ class TestBuildBatchSummaryStandardMode:
         assert "A" * 50 in rendered
         assert "A" * 51 not in rendered
 
+    def test_empty_decision_yields_empty_string_not_na(self):
+        """PROP-NEG-06: standard mode with absent/blank final_trade_decision → "" not "N/A"."""
+        from cli.batch import build_batch_summary, _standard_decision
+        # Direct check of the extractor: absent and all-blank both yield ""
+        assert _standard_decision({}) == ""
+        assert _standard_decision({"final_trade_decision": ""}) == ""
+        assert _standard_decision({"final_trade_decision": "\n\n   \n"}) == ""
+        # Rendered table must not contain "N/A" for a standard-mode empty decision
+        results = {"AAPL": _make_record("AAPL", trade_decision=None)}
+        table, _ = build_batch_summary(results, [], ["market"], ["AAPL"])
+        rendered = _render_table(table)
+        assert "N/A" not in rendered
+
     def test_row_order_matches_ordered_tickers(self):
         from cli.batch import build_batch_summary
         results = {
