@@ -50,6 +50,18 @@ def normalize_ticker_symbol(ticker: str) -> str:
     return ticker.strip().upper()
 
 
+def parse_tickers_input(csv_string: str) -> list[str]:
+    """Parse a comma-separated ticker string into a normalised, deduplicated list.
+
+    - Splits on ","
+    - Normalises each token via normalize_ticker_symbol()
+    - Discards empty tokens
+    - Deduplicates preserving first-occurrence order
+    """
+    tokens = [normalize_ticker_symbol(t) for t in csv_string.split(",") if t.strip()]
+    return list(dict.fromkeys(tokens))
+
+
 def detect_asset_type(ticker: str) -> AssetType:
     normalized_ticker = ticker.strip().upper()
     if normalized_ticker.endswith(CRYPTO_SUFFIXES):

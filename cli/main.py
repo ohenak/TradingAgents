@@ -121,6 +121,25 @@ class MessageBuffer:
         self.tool_calls.clear()
         self._processed_message_ids.clear()
 
+    def reset(self) -> None:
+        """Reset all per-analysis state for batch mode reuse.
+
+        Clears data fields and removes any monkey-patched instance methods
+        (add_message, add_tool_call, update_report_section) so the class-level
+        methods are restored for the next ticker. See DEC-MULTI-02.
+        """
+        self.messages.clear()
+        self.tool_calls.clear()
+        self._processed_message_ids.clear()
+        self.agent_status = {}
+        self.current_report = None
+        self.final_report = None
+        self.current_agent = None
+        self.report_sections = {}
+        self.selected_analysts = []
+        for attr in ("add_message", "add_tool_call", "update_report_section"):
+            self.__dict__.pop(attr, None)
+
     def get_completed_reports_count(self):
         """Count reports that are finalized (their finalizing agent is completed).
 
